@@ -15,14 +15,24 @@ void main() {
       expect(acc.beatsInWindow, 3);
     });
 
-    test('Un RR aberrant (> 5 %) est marqué artefact et exclu du RMSSD', () {
+    test('Un RR physiologiquement impossible (< 300 ms) est toujours artefact', () {
+      // Étage 1 : plausibilité absolue, pas d'amorçage requis.
       final acc = LiveHrvAccumulator();
-      acc.addRr(800);
-      acc.addRr(800);
-      final flagged = acc.addRr(1200); // +50 % → artefact
+      final flagged = acc.addRr(200); // 200 ms < 300 ms → impossible
       expect(flagged, isTrue);
       expect(acc.artifactRatio, greaterThan(0));
-      // Le RMSSD ne porte que sur les RR valides (deux 800) → 0.
+    });
+
+    test('Un RR aberrant (> 20 %) est marqué artefact après amorçage (8 battements)', () {
+      // Étage 2 : filtre médian — actif seulement après 8 battements propres.
+      final acc = LiveHrvAccumulator();
+      for (var i = 0; i < 8; i++) {
+        acc.addRr(800); // 8 battements propres → amorçage terminé
+      }
+      final flagged = acc.addRr(1200); // +50 % vs médiane 800 ms → artefact
+      expect(flagged, isTrue);
+      expect(acc.artifactRatio, greaterThan(0));
+      // Le RMSSD porte sur les 8 RR valides identiques → 0.
       expect(acc.rmssd, closeTo(0.0, 0.001));
     });
 

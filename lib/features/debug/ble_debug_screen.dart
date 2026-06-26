@@ -1,12 +1,18 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../data/ble/ble_providers.dart';
+import '../../data/foreground/foreground_service_manager.dart';
 
 /// Écran de debug : connecter un cardiofréquencemètre BLE (Polar H10,
 /// Cardiosport…) et visualiser FC, RR, RMSSD et taux d'artefacts en direct.
+/// Permet également de démarrer / arrêter un enregistrement long (service
+/// de premier plan, écran éteint).
 class BleDebugScreen extends ConsumerWidget {
   const BleDebugScreen({super.key});
 
@@ -20,6 +26,7 @@ class BleDebugScreen extends ConsumerWidget {
     final bluetoothOn = adapter == BluetoothAdapterState.on;
     final connected = acq.status == ConnStatus.connected ||
         acq.status == ConnStatus.reconnecting;
+    final enregistrement = ref.watch(isRecordingProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -36,8 +43,13 @@ class BleDebugScreen extends ConsumerWidget {
               _banner('Active le Bluetooth pour scanner.', Colors.red.shade400),
             if (acq.status == ConnStatus.error && acq.error != null)
               _banner(acq.error!, Colors.red.shade400),
+            if (enregistrement)
+              _banner(
+                '● Enregistrement actif — l\'acquisition continue écran éteint.',
+                _teal,
+              ),
             if (connected)
-              Expanded(child: _livePanel(ref, acq))
+              Expanded(child: _livePanel(context, ref, acq, enregistrement))
             else
               Expanded(child: _scanPanel(ref, bluetoothOn)),
           ],
@@ -108,7 +120,12 @@ class BleDebugScreen extends ConsumerWidget {
   }
 
   // ---------- Live ----------
-  Widget _livePanel(WidgetRef ref, AcquisitionState acq) {
+  Widget _livePanel(
+    BuildContext context,
+    WidgetRef ref,
+    AcquisitionState acq,
+    bool enregistrement,
+  ) {
     final rmssd = acq.rmssd.isNaN ? '—' : acq.rmssd.toStringAsFixed(1);
     final artifactPct = (acq.artifactRatio * 100).toStringAsFixed(1);
     final reconnecting = acq.status == ConnStatus.reconnecting;
@@ -159,6 +176,25 @@ class BleDebugScreen extends ConsumerWidget {
             _metric('Battements', '${acq.beatsInWindow}', _orange),
           ],
         ),
+        const SizedBox(height: 16),
+
+        // --- Boutons enregistrement long ---
+        if (!enregistrement)
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: _orange),
+            icon: const Icon(Icons.fiber_manual_record),
+            label: const Text('Démarrer enregistrement long'),
+            onPressed: () => _demarrerEnregistrement(context, ref),
+          )
+        else
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+            icon: const Icon(Icons.stop),
+            label: const Text('Arrêter enregistrement'),
+            onPressed: () =>
+                ref.read(foregroundServiceManagerProvider).arreterEnregistrement(),
+          ),
+
         const SizedBox(height: 20),
         const Text('Derniers RR (ms)',
             style: TextStyle(fontWeight: FontWeight.w600)),
@@ -206,6 +242,61 @@ class BleDebugScreen extends ConsumerWidget {
           ),
         ),
       );
+
+  Future<void> _demarrerEnregistrement(
+      BuildContext context, WidgetRef ref) async {
+    await _ensurePermissions();
+
+    final manager = ref.read(foregroundServiceManagerProvider);
+
+    // Vérifie l'exclusion d'optimisation batterie avant de démarrer.
+    if (Platform.isAndroid && !await manager.ignoresBatterie) {
+      if (!context.mounted) return;
+      final confirme = await _dialogBatterie(context, manager);
+      if (!confirme || !context.mounted) return;
+    }
+
+    final result = await manager.demarrerEnregistrement();
+    if (!context.mounted) return;
+    if (result is ServiceRequestFailure) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur service : ${result.error}')),
+      );
+    }
+  }
+
+  /// Dialog expliquant pourquoi l'exclusion batterie est nécessaire,
+  /// avec mention spécifique MIUI pour les Xiaomi.
+  Future<bool> _dialogBatterie(
+      BuildContext context, ForegroundServiceManager manager) async {
+    final confirme = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Optimisation batterie'),
+        content: const Text(
+          'Pour que l\'acquisition continue écran éteint, '
+          'l\'app doit être exclue de l\'optimisation batterie.\n\n'
+          'Sur Xiaomi / MIUI : après avoir accordé ci-dessous, '
+          'va aussi dans Sécurité → Gestion des autorisations → '
+          'Démarrage automatique et active l\'app.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ouvrir les réglages'),
+          ),
+        ],
+      ),
+    );
+    if (confirme == true) {
+      await manager.ouvrirReglagesBatterie();
+    }
+    return confirme == true;
+  }
 
   static Future<void> _ensurePermissions() async {
     await [

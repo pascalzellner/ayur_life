@@ -13,9 +13,18 @@
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!-- Notification persistante du futur service de premier plan      -->
-    <!-- (Android 13+). Déclarée dès maintenant, demandée à l'exécution.-->
+    <!-- Notification persistante du service de premier plan (Android 13+).-->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Service de premier plan (type connectedDevice pour le BLE long).  -->
+    <!-- FOREGROUND_SERVICE est auto-mergé par le plugin mais on le laisse  -->
+    <!-- visible ici pour l'audit de permissions.                           -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- Exclusion d'optimisation batterie : nécessaire pour les longues    -->
+    <!-- acquisitions (mode D). Dialogue système, pas d'accès Play Store.   -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Podomètre / reconnaissance d'activité (mode D, incrément        -->
     <!-- suivant). Sans effet tant que le mode D n'est pas codé.        -->
@@ -70,6 +79,14 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Service de premier plan flutter_foreground_task.              -->
+        <!-- Type connectedDevice : pas de timeout Android 15, adapté BLE. -->
+        <!-- Ne PAS utiliser dataSync (timeout 6 h sur Android 15).        -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
     </application>
 
     <queries>

@@ -4,6 +4,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/hrv/live_hrv_accumulator.dart';
+import '../foreground/foreground_service_manager.dart';
 import 'ble_heart_rate_repository.dart';
 import 'heart_rate_parser.dart';
 
@@ -161,6 +162,11 @@ class AcquisitionController extends Notifier<AcquisitionState> {
       totalBeats: _hrv.totalReceived,
       lastWasArtifact: lastArtifact,
     );
+    // Mise à jour throttlée de la notification persistante (no-op si service arrêté).
+    ref.read(foregroundServiceManagerProvider).mettreAJourNotification(
+          hr: sample.hr,
+          rmssd: _hrv.rmssd,
+        );
   }
 
   Future<void> disconnect() async {
