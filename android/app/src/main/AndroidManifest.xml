@@ -1,0 +1,81 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ============================================================= -->
+    <!--  Permissions BLE — Phase 1 (objectif : zéro permission         -->
+    <!--  sensible, aucune localisation).                               -->
+    <!-- ============================================================= -->
+
+    <!-- Scan BLE sans localisation (Android 12+) : le flag             -->
+    <!-- neverForLocation indique qu'on ne dérive PAS la position des   -->
+    <!-- résultats BLE, ce qui évite ACCESS_FINE_LOCATION.              -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Notification persistante du futur service de premier plan      -->
+    <!-- (Android 13+). Déclarée dès maintenant, demandée à l'exécution.-->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Podomètre / reconnaissance d'activité (mode D, incrément        -->
+    <!-- suivant). Sans effet tant que le mode D n'est pas codé.        -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <!-- Bluetooth "classique" pour la compatibilité Android <= 11.      -->
+    <!-- maxSdkVersion=30 : ces permissions ne s'appliquent qu'aux       -->
+    <!-- anciennes versions ; sur 12+ ce sont SCAN/CONNECT ci-dessus.    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+
+    <!-- ⚠️ Android <= 11 UNIQUEMENT : l'OS exige la localisation pour    -->
+    <!-- scanner en BLE. À n'activer QUE si tu dois supporter ces        -->
+    <!-- vieux appareils. Laisser commenté pour rester "zéro location". -->
+    <!--
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+    -->
+
+    <!-- Indique que le BLE est utilisé mais non strictement requis       -->
+    <!-- (l'app s'installe même sans, ex. tablette sans BLE).            -->
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="false" />
+
+    <application
+        android:label="Ayur Life"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+</manifest>
