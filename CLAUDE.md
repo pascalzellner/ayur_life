@@ -94,7 +94,7 @@ lib/
 | BLE | `flutter_blue_plus` |
 | Service premier plan | `flutter_foreground_task` (9.2.2) |
 | FFT / spline | `fftea` / `equations` |
-| **Base locale** | **`drift_flutter`** (PAS `drift`+`sqlite3_flutter_libs` — cf. §14) |
+| **Base locale** | **`drift` + `sqlite3_flutter_libs`** (cf. §14) |
 | Compte / État | `supabase_flutter` / `flutter_riverpod` |
 | Capteurs mode D | `pedometer`, `sensors_plus` |
 | Permissions / notifs | `permission_handler`, `flutter_local_notifications` |
@@ -169,9 +169,11 @@ fvm dart run build_runner build --delete-conflicting-outputs   # drift (watch en
   Windows le hook `objective_c` (via `permission_handler`/`path_provider`) **fige `build_runner`**.
   **TOUJOURS** `fvm flutter/dart ...`. VS Code : `dart.flutterSdkPath = .fvm/flutter_sdk`. Remonter en
   3.10+ quand dart-lang/sdk#62593 corrigé. (« dart build » ne marche pas — ne pas retenter.)
-- **`drift_flutter`** (pas `drift`+`sqlite3_flutter_libs`) : évite le hook sqlite3, binaires Android
-  précompilés. Tests : `NativeDatabase.memory()` via `drift/native.dart`, importer `drift/drift.dart`
-  avec `hide isNull, isNotNull`.
+- **`drift` + `sqlite3_flutter_libs`** (pas `drift_flutter`) : `sqlite3_flutter_libs` a un hook
+  native-assets, mais inoffensif **car SDK épinglé en 3.9.2** (hooks natifs = spécifiques à Dart 3.10+,
+  cf. ligne précédente) — binaires Android précompilés. Prod : `NativeDatabase.createInBackground` sur
+  fichier (`app_database.dart`). Tests : `NativeDatabase.memory()` via `drift/native.dart`, importer
+  `drift/drift.dart` avec `hide isNull, isNotNull`.
 
 **Capteur / mesure**
 - **HRV fiable UNIQUEMENT au repos/immobile** : en mouvement artefacts ~50 % = **NORMAL** (bruit rejeté),
