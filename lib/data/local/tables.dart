@@ -81,6 +81,10 @@ class Profile extends Table {
 
   // Fréquence cardiaque de référence
   IntColumn get hrRest => integer().nullable()();
+
+  /// 'mode_c' | 'manual' — origine de la FC de repos courante.
+  TextColumn get hrRestSource => text().nullable()();
+
   IntColumn get hrMax => integer().nullable()();
 
   /// 'measured' | 'tanaka' | 'manual'
@@ -104,6 +108,23 @@ class Profile extends Table {
 
   @override
   Set<Column> get primaryKey => {userId};
+}
+
+// ── HooperMackinnonEntries (une ligne par séance mode C) ─────────────────────
+
+class HooperMackinnonEntries extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get sessionId =>
+      integer().references(Sessions, #id, onDelete: KeyAction.cascade)();
+  TextColumn get userId => text()();
+
+  /// 4 items Hooper-Mackinnon, chacun noté 1–7 (1 = excellent, 7 = très mauvais).
+  IntColumn get fatigue => integer()();    // fatigue générale
+  IntColumn get stress => integer()();     // stress du matin
+  IntColumn get doms => integer()();       // courbatures
+  IntColumn get sleep => integer()();      // qualité du sommeil
+
+  DateTimeColumn get recordedAt => dateTime()();
 }
 
 // ── DailyEntries (une ligne par userId × jour) ────────────────────────────────

@@ -21,4 +21,12 @@ class RrDao extends DatabaseAccessor<AppDatabase> with _$RrDaoMixin {
     final row = await query.getSingle();
     return row.read(count) ?? 0;
   }
+
+  /// Tous les RR d'une session (incluant les lignes gap) triés par tMs.
+  /// Utilisé pour le calcul TRIMP Banister en fin de session mode D.
+  Future<List<RrSample>> getRrForTrimp(int sessionId) =>
+      (select(rrSamples)
+            ..where((r) => r.sessionId.equals(sessionId))
+            ..orderBy([(r) => OrderingTerm.asc(r.tMs)]))
+          .get();
 }

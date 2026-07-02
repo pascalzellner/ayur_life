@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'daos/consent_dao.dart';
 import 'daos/daily_entry_dao.dart';
+import 'daos/hooper_dao.dart';
 import 'daos/indicator_dao.dart';
 import 'daos/profile_dao.dart';
 import 'daos/rr_dao.dart';
@@ -16,26 +17,47 @@ import 'tables.dart';
 part 'app_database.g.dart';
 
 @DriftDatabase(
-  tables: [Sessions, Indicators, RrSamples, ConsentLog, Profile, DailyEntries],
-  daos: [SessionDao, IndicatorDao, RrDao, ProfileDao, ConsentDao, DailyEntryDao],
+  tables: [
+    Sessions,
+    Indicators,
+    RrSamples,
+    ConsentLog,
+    Profile,
+    DailyEntries,
+    HooperMackinnonEntries,
+  ],
+  daos: [
+    SessionDao,
+    IndicatorDao,
+    RrDao,
+    ProfileDao,
+    ConsentDao,
+    DailyEntryDao,
+    HooperDao,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor])
       : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) => m.createAll(),
         onUpgrade: (m, from, to) async {
           if (from < 2) {
-            // Ajout non-destructif : sessions existantes auront rpePhysical = NULL.
             await m.addColumn(
                 sessions, sessions.rpePhysical as GeneratedColumn<Object>);
-            // Nouvelle table indépendante — aucune donnée existante concernée.
             await m.createTable(dailyEntries);
+          }
+          if (from < 3) {
+            await m.addColumn(
+                profile, profile.hrRestSource as GeneratedColumn<Object>);
+          }
+          if (from < 4) {
+            await m.createTable(hooperMackinnonEntries);
           }
         },
       );

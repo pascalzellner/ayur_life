@@ -1591,6 +1591,17 @@ class $ProfileTable extends Profile with TableInfo<$ProfileTable, ProfileData> {
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _hrRestSourceMeta = const VerificationMeta(
+    'hrRestSource',
+  );
+  @override
+  late final GeneratedColumn<String> hrRestSource = GeneratedColumn<String>(
+    'hr_rest_source',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _hrMaxMeta = const VerificationMeta('hrMax');
   @override
   late final GeneratedColumn<int> hrMax = GeneratedColumn<int>(
@@ -1693,6 +1704,7 @@ class $ProfileTable extends Profile with TableInfo<$ProfileTable, ProfileData> {
     weightKg,
     heightCm,
     hrRest,
+    hrRestSource,
     hrMax,
     hrMaxSource,
     fcSv1,
@@ -1751,6 +1763,15 @@ class $ProfileTable extends Profile with TableInfo<$ProfileTable, ProfileData> {
       context.handle(
         _hrRestMeta,
         hrRest.isAcceptableOrUnknown(data['hr_rest']!, _hrRestMeta),
+      );
+    }
+    if (data.containsKey('hr_rest_source')) {
+      context.handle(
+        _hrRestSourceMeta,
+        hrRestSource.isAcceptableOrUnknown(
+          data['hr_rest_source']!,
+          _hrRestSourceMeta,
+        ),
       );
     }
     if (data.containsKey('hr_max')) {
@@ -1857,6 +1878,10 @@ class $ProfileTable extends Profile with TableInfo<$ProfileTable, ProfileData> {
         DriftSqlType.int,
         data['${effectivePrefix}hr_rest'],
       ),
+      hrRestSource: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}hr_rest_source'],
+      ),
       hrMax: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}hr_max'],
@@ -1909,6 +1934,9 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
   final double? weightKg;
   final double? heightCm;
   final int? hrRest;
+
+  /// 'mode_c' | 'manual' — origine de la FC de repos courante.
+  final String? hrRestSource;
   final int? hrMax;
 
   /// 'measured' | 'tanaka' | 'manual'
@@ -1931,6 +1959,7 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
     this.weightKg,
     this.heightCm,
     this.hrRest,
+    this.hrRestSource,
     this.hrMax,
     this.hrMaxSource,
     this.fcSv1,
@@ -1959,6 +1988,9 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
     }
     if (!nullToAbsent || hrRest != null) {
       map['hr_rest'] = Variable<int>(hrRest);
+    }
+    if (!nullToAbsent || hrRestSource != null) {
+      map['hr_rest_source'] = Variable<String>(hrRestSource);
     }
     if (!nullToAbsent || hrMax != null) {
       map['hr_max'] = Variable<int>(hrMax);
@@ -2002,6 +2034,9 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
       hrRest: hrRest == null && nullToAbsent
           ? const Value.absent()
           : Value(hrRest),
+      hrRestSource: hrRestSource == null && nullToAbsent
+          ? const Value.absent()
+          : Value(hrRestSource),
       hrMax: hrMax == null && nullToAbsent
           ? const Value.absent()
           : Value(hrMax),
@@ -2042,6 +2077,7 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
       weightKg: serializer.fromJson<double?>(json['weightKg']),
       heightCm: serializer.fromJson<double?>(json['heightCm']),
       hrRest: serializer.fromJson<int?>(json['hrRest']),
+      hrRestSource: serializer.fromJson<String?>(json['hrRestSource']),
       hrMax: serializer.fromJson<int?>(json['hrMax']),
       hrMaxSource: serializer.fromJson<String?>(json['hrMaxSource']),
       fcSv1: serializer.fromJson<int?>(json['fcSv1']),
@@ -2067,6 +2103,7 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
       'weightKg': serializer.toJson<double?>(weightKg),
       'heightCm': serializer.toJson<double?>(heightCm),
       'hrRest': serializer.toJson<int?>(hrRest),
+      'hrRestSource': serializer.toJson<String?>(hrRestSource),
       'hrMax': serializer.toJson<int?>(hrMax),
       'hrMaxSource': serializer.toJson<String?>(hrMaxSource),
       'fcSv1': serializer.toJson<int?>(fcSv1),
@@ -2086,6 +2123,7 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
     Value<double?> weightKg = const Value.absent(),
     Value<double?> heightCm = const Value.absent(),
     Value<int?> hrRest = const Value.absent(),
+    Value<String?> hrRestSource = const Value.absent(),
     Value<int?> hrMax = const Value.absent(),
     Value<String?> hrMaxSource = const Value.absent(),
     Value<int?> fcSv1 = const Value.absent(),
@@ -2102,6 +2140,7 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
     weightKg: weightKg.present ? weightKg.value : this.weightKg,
     heightCm: heightCm.present ? heightCm.value : this.heightCm,
     hrRest: hrRest.present ? hrRest.value : this.hrRest,
+    hrRestSource: hrRestSource.present ? hrRestSource.value : this.hrRestSource,
     hrMax: hrMax.present ? hrMax.value : this.hrMax,
     hrMaxSource: hrMaxSource.present ? hrMaxSource.value : this.hrMaxSource,
     fcSv1: fcSv1.present ? fcSv1.value : this.fcSv1,
@@ -2128,6 +2167,9 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
       weightKg: data.weightKg.present ? data.weightKg.value : this.weightKg,
       heightCm: data.heightCm.present ? data.heightCm.value : this.heightCm,
       hrRest: data.hrRest.present ? data.hrRest.value : this.hrRest,
+      hrRestSource: data.hrRestSource.present
+          ? data.hrRestSource.value
+          : this.hrRestSource,
       hrMax: data.hrMax.present ? data.hrMax.value : this.hrMax,
       hrMaxSource: data.hrMaxSource.present
           ? data.hrMaxSource.value
@@ -2159,6 +2201,7 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
           ..write('weightKg: $weightKg, ')
           ..write('heightCm: $heightCm, ')
           ..write('hrRest: $hrRest, ')
+          ..write('hrRestSource: $hrRestSource, ')
           ..write('hrMax: $hrMax, ')
           ..write('hrMaxSource: $hrMaxSource, ')
           ..write('fcSv1: $fcSv1, ')
@@ -2180,6 +2223,7 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
     weightKg,
     heightCm,
     hrRest,
+    hrRestSource,
     hrMax,
     hrMaxSource,
     fcSv1,
@@ -2200,6 +2244,7 @@ class ProfileData extends DataClass implements Insertable<ProfileData> {
           other.weightKg == this.weightKg &&
           other.heightCm == this.heightCm &&
           other.hrRest == this.hrRest &&
+          other.hrRestSource == this.hrRestSource &&
           other.hrMax == this.hrMax &&
           other.hrMaxSource == this.hrMaxSource &&
           other.fcSv1 == this.fcSv1 &&
@@ -2218,6 +2263,7 @@ class ProfileCompanion extends UpdateCompanion<ProfileData> {
   final Value<double?> weightKg;
   final Value<double?> heightCm;
   final Value<int?> hrRest;
+  final Value<String?> hrRestSource;
   final Value<int?> hrMax;
   final Value<String?> hrMaxSource;
   final Value<int?> fcSv1;
@@ -2235,6 +2281,7 @@ class ProfileCompanion extends UpdateCompanion<ProfileData> {
     this.weightKg = const Value.absent(),
     this.heightCm = const Value.absent(),
     this.hrRest = const Value.absent(),
+    this.hrRestSource = const Value.absent(),
     this.hrMax = const Value.absent(),
     this.hrMaxSource = const Value.absent(),
     this.fcSv1 = const Value.absent(),
@@ -2253,6 +2300,7 @@ class ProfileCompanion extends UpdateCompanion<ProfileData> {
     this.weightKg = const Value.absent(),
     this.heightCm = const Value.absent(),
     this.hrRest = const Value.absent(),
+    this.hrRestSource = const Value.absent(),
     this.hrMax = const Value.absent(),
     this.hrMaxSource = const Value.absent(),
     this.fcSv1 = const Value.absent(),
@@ -2272,6 +2320,7 @@ class ProfileCompanion extends UpdateCompanion<ProfileData> {
     Expression<double>? weightKg,
     Expression<double>? heightCm,
     Expression<int>? hrRest,
+    Expression<String>? hrRestSource,
     Expression<int>? hrMax,
     Expression<String>? hrMaxSource,
     Expression<int>? fcSv1,
@@ -2290,6 +2339,7 @@ class ProfileCompanion extends UpdateCompanion<ProfileData> {
       if (weightKg != null) 'weight_kg': weightKg,
       if (heightCm != null) 'height_cm': heightCm,
       if (hrRest != null) 'hr_rest': hrRest,
+      if (hrRestSource != null) 'hr_rest_source': hrRestSource,
       if (hrMax != null) 'hr_max': hrMax,
       if (hrMaxSource != null) 'hr_max_source': hrMaxSource,
       if (fcSv1 != null) 'fc_sv1': fcSv1,
@@ -2311,6 +2361,7 @@ class ProfileCompanion extends UpdateCompanion<ProfileData> {
     Value<double?>? weightKg,
     Value<double?>? heightCm,
     Value<int?>? hrRest,
+    Value<String?>? hrRestSource,
     Value<int?>? hrMax,
     Value<String?>? hrMaxSource,
     Value<int?>? fcSv1,
@@ -2329,6 +2380,7 @@ class ProfileCompanion extends UpdateCompanion<ProfileData> {
       weightKg: weightKg ?? this.weightKg,
       heightCm: heightCm ?? this.heightCm,
       hrRest: hrRest ?? this.hrRest,
+      hrRestSource: hrRestSource ?? this.hrRestSource,
       hrMax: hrMax ?? this.hrMax,
       hrMaxSource: hrMaxSource ?? this.hrMaxSource,
       fcSv1: fcSv1 ?? this.fcSv1,
@@ -2362,6 +2414,9 @@ class ProfileCompanion extends UpdateCompanion<ProfileData> {
     }
     if (hrRest.present) {
       map['hr_rest'] = Variable<int>(hrRest.value);
+    }
+    if (hrRestSource.present) {
+      map['hr_rest_source'] = Variable<String>(hrRestSource.value);
     }
     if (hrMax.present) {
       map['hr_max'] = Variable<int>(hrMax.value);
@@ -2405,6 +2460,7 @@ class ProfileCompanion extends UpdateCompanion<ProfileData> {
           ..write('weightKg: $weightKg, ')
           ..write('heightCm: $heightCm, ')
           ..write('hrRest: $hrRest, ')
+          ..write('hrRestSource: $hrRestSource, ')
           ..write('hrMax: $hrMax, ')
           ..write('hrMaxSource: $hrMaxSource, ')
           ..write('fcSv1: $fcSv1, ')
@@ -2806,6 +2862,509 @@ class DailyEntriesCompanion extends UpdateCompanion<DailyEntry> {
   }
 }
 
+class $HooperMackinnonEntriesTable extends HooperMackinnonEntries
+    with TableInfo<$HooperMackinnonEntriesTable, HooperMackinnonEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $HooperMackinnonEntriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _sessionIdMeta = const VerificationMeta(
+    'sessionId',
+  );
+  @override
+  late final GeneratedColumn<int> sessionId = GeneratedColumn<int>(
+    'session_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES sessions (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+    'user_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fatigueMeta = const VerificationMeta(
+    'fatigue',
+  );
+  @override
+  late final GeneratedColumn<int> fatigue = GeneratedColumn<int>(
+    'fatigue',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _stressMeta = const VerificationMeta('stress');
+  @override
+  late final GeneratedColumn<int> stress = GeneratedColumn<int>(
+    'stress',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _domsMeta = const VerificationMeta('doms');
+  @override
+  late final GeneratedColumn<int> doms = GeneratedColumn<int>(
+    'doms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sleepMeta = const VerificationMeta('sleep');
+  @override
+  late final GeneratedColumn<int> sleep = GeneratedColumn<int>(
+    'sleep',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _recordedAtMeta = const VerificationMeta(
+    'recordedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> recordedAt = GeneratedColumn<DateTime>(
+    'recorded_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    sessionId,
+    userId,
+    fatigue,
+    stress,
+    doms,
+    sleep,
+    recordedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'hooper_mackinnon_entries';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<HooperMackinnonEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('session_id')) {
+      context.handle(
+        _sessionIdMeta,
+        sessionId.isAcceptableOrUnknown(data['session_id']!, _sessionIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sessionIdMeta);
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(
+        _userIdMeta,
+        userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_userIdMeta);
+    }
+    if (data.containsKey('fatigue')) {
+      context.handle(
+        _fatigueMeta,
+        fatigue.isAcceptableOrUnknown(data['fatigue']!, _fatigueMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fatigueMeta);
+    }
+    if (data.containsKey('stress')) {
+      context.handle(
+        _stressMeta,
+        stress.isAcceptableOrUnknown(data['stress']!, _stressMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_stressMeta);
+    }
+    if (data.containsKey('doms')) {
+      context.handle(
+        _domsMeta,
+        doms.isAcceptableOrUnknown(data['doms']!, _domsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_domsMeta);
+    }
+    if (data.containsKey('sleep')) {
+      context.handle(
+        _sleepMeta,
+        sleep.isAcceptableOrUnknown(data['sleep']!, _sleepMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sleepMeta);
+    }
+    if (data.containsKey('recorded_at')) {
+      context.handle(
+        _recordedAtMeta,
+        recordedAt.isAcceptableOrUnknown(data['recorded_at']!, _recordedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_recordedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  HooperMackinnonEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return HooperMackinnonEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      sessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}session_id'],
+      )!,
+      userId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_id'],
+      )!,
+      fatigue: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}fatigue'],
+      )!,
+      stress: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}stress'],
+      )!,
+      doms: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}doms'],
+      )!,
+      sleep: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sleep'],
+      )!,
+      recordedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}recorded_at'],
+      )!,
+    );
+  }
+
+  @override
+  $HooperMackinnonEntriesTable createAlias(String alias) {
+    return $HooperMackinnonEntriesTable(attachedDatabase, alias);
+  }
+}
+
+class HooperMackinnonEntry extends DataClass
+    implements Insertable<HooperMackinnonEntry> {
+  final int id;
+  final int sessionId;
+  final String userId;
+
+  /// 4 items Hooper-Mackinnon, chacun noté 1–7 (1 = excellent, 7 = très mauvais).
+  final int fatigue;
+  final int stress;
+  final int doms;
+  final int sleep;
+  final DateTime recordedAt;
+  const HooperMackinnonEntry({
+    required this.id,
+    required this.sessionId,
+    required this.userId,
+    required this.fatigue,
+    required this.stress,
+    required this.doms,
+    required this.sleep,
+    required this.recordedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['session_id'] = Variable<int>(sessionId);
+    map['user_id'] = Variable<String>(userId);
+    map['fatigue'] = Variable<int>(fatigue);
+    map['stress'] = Variable<int>(stress);
+    map['doms'] = Variable<int>(doms);
+    map['sleep'] = Variable<int>(sleep);
+    map['recorded_at'] = Variable<DateTime>(recordedAt);
+    return map;
+  }
+
+  HooperMackinnonEntriesCompanion toCompanion(bool nullToAbsent) {
+    return HooperMackinnonEntriesCompanion(
+      id: Value(id),
+      sessionId: Value(sessionId),
+      userId: Value(userId),
+      fatigue: Value(fatigue),
+      stress: Value(stress),
+      doms: Value(doms),
+      sleep: Value(sleep),
+      recordedAt: Value(recordedAt),
+    );
+  }
+
+  factory HooperMackinnonEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return HooperMackinnonEntry(
+      id: serializer.fromJson<int>(json['id']),
+      sessionId: serializer.fromJson<int>(json['sessionId']),
+      userId: serializer.fromJson<String>(json['userId']),
+      fatigue: serializer.fromJson<int>(json['fatigue']),
+      stress: serializer.fromJson<int>(json['stress']),
+      doms: serializer.fromJson<int>(json['doms']),
+      sleep: serializer.fromJson<int>(json['sleep']),
+      recordedAt: serializer.fromJson<DateTime>(json['recordedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'sessionId': serializer.toJson<int>(sessionId),
+      'userId': serializer.toJson<String>(userId),
+      'fatigue': serializer.toJson<int>(fatigue),
+      'stress': serializer.toJson<int>(stress),
+      'doms': serializer.toJson<int>(doms),
+      'sleep': serializer.toJson<int>(sleep),
+      'recordedAt': serializer.toJson<DateTime>(recordedAt),
+    };
+  }
+
+  HooperMackinnonEntry copyWith({
+    int? id,
+    int? sessionId,
+    String? userId,
+    int? fatigue,
+    int? stress,
+    int? doms,
+    int? sleep,
+    DateTime? recordedAt,
+  }) => HooperMackinnonEntry(
+    id: id ?? this.id,
+    sessionId: sessionId ?? this.sessionId,
+    userId: userId ?? this.userId,
+    fatigue: fatigue ?? this.fatigue,
+    stress: stress ?? this.stress,
+    doms: doms ?? this.doms,
+    sleep: sleep ?? this.sleep,
+    recordedAt: recordedAt ?? this.recordedAt,
+  );
+  HooperMackinnonEntry copyWithCompanion(HooperMackinnonEntriesCompanion data) {
+    return HooperMackinnonEntry(
+      id: data.id.present ? data.id.value : this.id,
+      sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
+      userId: data.userId.present ? data.userId.value : this.userId,
+      fatigue: data.fatigue.present ? data.fatigue.value : this.fatigue,
+      stress: data.stress.present ? data.stress.value : this.stress,
+      doms: data.doms.present ? data.doms.value : this.doms,
+      sleep: data.sleep.present ? data.sleep.value : this.sleep,
+      recordedAt: data.recordedAt.present
+          ? data.recordedAt.value
+          : this.recordedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HooperMackinnonEntry(')
+          ..write('id: $id, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('userId: $userId, ')
+          ..write('fatigue: $fatigue, ')
+          ..write('stress: $stress, ')
+          ..write('doms: $doms, ')
+          ..write('sleep: $sleep, ')
+          ..write('recordedAt: $recordedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    sessionId,
+    userId,
+    fatigue,
+    stress,
+    doms,
+    sleep,
+    recordedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is HooperMackinnonEntry &&
+          other.id == this.id &&
+          other.sessionId == this.sessionId &&
+          other.userId == this.userId &&
+          other.fatigue == this.fatigue &&
+          other.stress == this.stress &&
+          other.doms == this.doms &&
+          other.sleep == this.sleep &&
+          other.recordedAt == this.recordedAt);
+}
+
+class HooperMackinnonEntriesCompanion
+    extends UpdateCompanion<HooperMackinnonEntry> {
+  final Value<int> id;
+  final Value<int> sessionId;
+  final Value<String> userId;
+  final Value<int> fatigue;
+  final Value<int> stress;
+  final Value<int> doms;
+  final Value<int> sleep;
+  final Value<DateTime> recordedAt;
+  const HooperMackinnonEntriesCompanion({
+    this.id = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    this.userId = const Value.absent(),
+    this.fatigue = const Value.absent(),
+    this.stress = const Value.absent(),
+    this.doms = const Value.absent(),
+    this.sleep = const Value.absent(),
+    this.recordedAt = const Value.absent(),
+  });
+  HooperMackinnonEntriesCompanion.insert({
+    this.id = const Value.absent(),
+    required int sessionId,
+    required String userId,
+    required int fatigue,
+    required int stress,
+    required int doms,
+    required int sleep,
+    required DateTime recordedAt,
+  }) : sessionId = Value(sessionId),
+       userId = Value(userId),
+       fatigue = Value(fatigue),
+       stress = Value(stress),
+       doms = Value(doms),
+       sleep = Value(sleep),
+       recordedAt = Value(recordedAt);
+  static Insertable<HooperMackinnonEntry> custom({
+    Expression<int>? id,
+    Expression<int>? sessionId,
+    Expression<String>? userId,
+    Expression<int>? fatigue,
+    Expression<int>? stress,
+    Expression<int>? doms,
+    Expression<int>? sleep,
+    Expression<DateTime>? recordedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (sessionId != null) 'session_id': sessionId,
+      if (userId != null) 'user_id': userId,
+      if (fatigue != null) 'fatigue': fatigue,
+      if (stress != null) 'stress': stress,
+      if (doms != null) 'doms': doms,
+      if (sleep != null) 'sleep': sleep,
+      if (recordedAt != null) 'recorded_at': recordedAt,
+    });
+  }
+
+  HooperMackinnonEntriesCompanion copyWith({
+    Value<int>? id,
+    Value<int>? sessionId,
+    Value<String>? userId,
+    Value<int>? fatigue,
+    Value<int>? stress,
+    Value<int>? doms,
+    Value<int>? sleep,
+    Value<DateTime>? recordedAt,
+  }) {
+    return HooperMackinnonEntriesCompanion(
+      id: id ?? this.id,
+      sessionId: sessionId ?? this.sessionId,
+      userId: userId ?? this.userId,
+      fatigue: fatigue ?? this.fatigue,
+      stress: stress ?? this.stress,
+      doms: doms ?? this.doms,
+      sleep: sleep ?? this.sleep,
+      recordedAt: recordedAt ?? this.recordedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (sessionId.present) {
+      map['session_id'] = Variable<int>(sessionId.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
+    }
+    if (fatigue.present) {
+      map['fatigue'] = Variable<int>(fatigue.value);
+    }
+    if (stress.present) {
+      map['stress'] = Variable<int>(stress.value);
+    }
+    if (doms.present) {
+      map['doms'] = Variable<int>(doms.value);
+    }
+    if (sleep.present) {
+      map['sleep'] = Variable<int>(sleep.value);
+    }
+    if (recordedAt.present) {
+      map['recorded_at'] = Variable<DateTime>(recordedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HooperMackinnonEntriesCompanion(')
+          ..write('id: $id, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('userId: $userId, ')
+          ..write('fatigue: $fatigue, ')
+          ..write('stress: $stress, ')
+          ..write('doms: $doms, ')
+          ..write('sleep: $sleep, ')
+          ..write('recordedAt: $recordedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2815,12 +3374,15 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ConsentLogTable consentLog = $ConsentLogTable(this);
   late final $ProfileTable profile = $ProfileTable(this);
   late final $DailyEntriesTable dailyEntries = $DailyEntriesTable(this);
+  late final $HooperMackinnonEntriesTable hooperMackinnonEntries =
+      $HooperMackinnonEntriesTable(this);
   late final SessionDao sessionDao = SessionDao(this as AppDatabase);
   late final IndicatorDao indicatorDao = IndicatorDao(this as AppDatabase);
   late final RrDao rrDao = RrDao(this as AppDatabase);
   late final ProfileDao profileDao = ProfileDao(this as AppDatabase);
   late final ConsentDao consentDao = ConsentDao(this as AppDatabase);
   late final DailyEntryDao dailyEntryDao = DailyEntryDao(this as AppDatabase);
+  late final HooperDao hooperDao = HooperDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2832,6 +3394,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     consentLog,
     profile,
     dailyEntries,
+    hooperMackinnonEntries,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -2848,6 +3411,15 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('rr_samples', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'sessions',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [
+        TableUpdate('hooper_mackinnon_entries', kind: UpdateKind.delete),
+      ],
     ),
   ]);
 }
@@ -2908,6 +3480,34 @@ final class $$SessionsTableReferences
     ).filter((f) => f.sessionId.id.sqlEquals($_itemColumn<int>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_rrSamplesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<
+    $HooperMackinnonEntriesTable,
+    List<HooperMackinnonEntry>
+  >
+  _hooperMackinnonEntriesRefsTable(_$AppDatabase db) =>
+      MultiTypedResultKey.fromTable(
+        db.hooperMackinnonEntries,
+        aliasName: $_aliasNameGenerator(
+          db.sessions.id,
+          db.hooperMackinnonEntries.sessionId,
+        ),
+      );
+
+  $$HooperMackinnonEntriesTableProcessedTableManager
+  get hooperMackinnonEntriesRefs {
+    final manager = $$HooperMackinnonEntriesTableTableManager(
+      $_db,
+      $_db.hooperMackinnonEntries,
+    ).filter((f) => f.sessionId.id.sqlEquals($_itemColumn<int>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _hooperMackinnonEntriesRefsTable($_db),
+    );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -3005,6 +3605,32 @@ class $$SessionsTableFilterComposer
                 $removeJoinBuilderFromRootComposer,
           ),
     );
+    return f(composer);
+  }
+
+  Expression<bool> hooperMackinnonEntriesRefs(
+    Expression<bool> Function($$HooperMackinnonEntriesTableFilterComposer f) f,
+  ) {
+    final $$HooperMackinnonEntriesTableFilterComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.hooperMackinnonEntries,
+          getReferencedColumn: (t) => t.sessionId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$HooperMackinnonEntriesTableFilterComposer(
+                $db: $db,
+                $table: $db.hooperMackinnonEntries,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
     return f(composer);
   }
 }
@@ -3137,6 +3763,32 @@ class $$SessionsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> hooperMackinnonEntriesRefs<T extends Object>(
+    Expression<T> Function($$HooperMackinnonEntriesTableAnnotationComposer a) f,
+  ) {
+    final $$HooperMackinnonEntriesTableAnnotationComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.hooperMackinnonEntries,
+          getReferencedColumn: (t) => t.sessionId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$HooperMackinnonEntriesTableAnnotationComposer(
+                $db: $db,
+                $table: $db.hooperMackinnonEntries,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return f(composer);
+  }
 }
 
 class $$SessionsTableTableManager
@@ -3152,7 +3804,11 @@ class $$SessionsTableTableManager
           $$SessionsTableUpdateCompanionBuilder,
           (Session, $$SessionsTableReferences),
           Session,
-          PrefetchHooks Function({bool indicatorsRefs, bool rrSamplesRefs})
+          PrefetchHooks Function({
+            bool indicatorsRefs,
+            bool rrSamplesRefs,
+            bool hooperMackinnonEntriesRefs,
+          })
         > {
   $$SessionsTableTableManager(_$AppDatabase db, $SessionsTable table)
     : super(
@@ -3210,12 +3866,17 @@ class $$SessionsTableTableManager
               )
               .toList(),
           prefetchHooksCallback:
-              ({indicatorsRefs = false, rrSamplesRefs = false}) {
+              ({
+                indicatorsRefs = false,
+                rrSamplesRefs = false,
+                hooperMackinnonEntriesRefs = false,
+              }) {
                 return PrefetchHooks(
                   db: db,
                   explicitlyWatchedTables: [
                     if (indicatorsRefs) db.indicators,
                     if (rrSamplesRefs) db.rrSamples,
+                    if (hooperMackinnonEntriesRefs) db.hooperMackinnonEntries,
                   ],
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
@@ -3262,6 +3923,27 @@ class $$SessionsTableTableManager
                               ),
                           typedResults: items,
                         ),
+                      if (hooperMackinnonEntriesRefs)
+                        await $_getPrefetchedData<
+                          Session,
+                          $SessionsTable,
+                          HooperMackinnonEntry
+                        >(
+                          currentTable: table,
+                          referencedTable: $$SessionsTableReferences
+                              ._hooperMackinnonEntriesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$SessionsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).hooperMackinnonEntriesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.sessionId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -3282,7 +3964,11 @@ typedef $$SessionsTableProcessedTableManager =
       $$SessionsTableUpdateCompanionBuilder,
       (Session, $$SessionsTableReferences),
       Session,
-      PrefetchHooks Function({bool indicatorsRefs, bool rrSamplesRefs})
+      PrefetchHooks Function({
+        bool indicatorsRefs,
+        bool rrSamplesRefs,
+        bool hooperMackinnonEntriesRefs,
+      })
     >;
 typedef $$IndicatorsTableCreateCompanionBuilder =
     IndicatorsCompanion Function({
@@ -4124,6 +4810,7 @@ typedef $$ProfileTableCreateCompanionBuilder =
       Value<double?> weightKg,
       Value<double?> heightCm,
       Value<int?> hrRest,
+      Value<String?> hrRestSource,
       Value<int?> hrMax,
       Value<String?> hrMaxSource,
       Value<int?> fcSv1,
@@ -4143,6 +4830,7 @@ typedef $$ProfileTableUpdateCompanionBuilder =
       Value<double?> weightKg,
       Value<double?> heightCm,
       Value<int?> hrRest,
+      Value<String?> hrRestSource,
       Value<int?> hrMax,
       Value<String?> hrMaxSource,
       Value<int?> fcSv1,
@@ -4191,6 +4879,11 @@ class $$ProfileTableFilterComposer
 
   ColumnFilters<int> get hrRest => $composableBuilder(
     column: $table.hrRest,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get hrRestSource => $composableBuilder(
+    column: $table.hrRestSource,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4279,6 +4972,11 @@ class $$ProfileTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get hrRestSource => $composableBuilder(
+    column: $table.hrRestSource,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get hrMax => $composableBuilder(
     column: $table.hrMax,
     builder: (column) => ColumnOrderings(column),
@@ -4351,6 +5049,11 @@ class $$ProfileTableAnnotationComposer
 
   GeneratedColumn<int> get hrRest =>
       $composableBuilder(column: $table.hrRest, builder: (column) => column);
+
+  GeneratedColumn<String> get hrRestSource => $composableBuilder(
+    column: $table.hrRestSource,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<int> get hrMax =>
       $composableBuilder(column: $table.hrMax, builder: (column) => column);
@@ -4427,6 +5130,7 @@ class $$ProfileTableTableManager
                 Value<double?> weightKg = const Value.absent(),
                 Value<double?> heightCm = const Value.absent(),
                 Value<int?> hrRest = const Value.absent(),
+                Value<String?> hrRestSource = const Value.absent(),
                 Value<int?> hrMax = const Value.absent(),
                 Value<String?> hrMaxSource = const Value.absent(),
                 Value<int?> fcSv1 = const Value.absent(),
@@ -4444,6 +5148,7 @@ class $$ProfileTableTableManager
                 weightKg: weightKg,
                 heightCm: heightCm,
                 hrRest: hrRest,
+                hrRestSource: hrRestSource,
                 hrMax: hrMax,
                 hrMaxSource: hrMaxSource,
                 fcSv1: fcSv1,
@@ -4463,6 +5168,7 @@ class $$ProfileTableTableManager
                 Value<double?> weightKg = const Value.absent(),
                 Value<double?> heightCm = const Value.absent(),
                 Value<int?> hrRest = const Value.absent(),
+                Value<String?> hrRestSource = const Value.absent(),
                 Value<int?> hrMax = const Value.absent(),
                 Value<String?> hrMaxSource = const Value.absent(),
                 Value<int?> fcSv1 = const Value.absent(),
@@ -4480,6 +5186,7 @@ class $$ProfileTableTableManager
                 weightKg: weightKg,
                 heightCm: heightCm,
                 hrRest: hrRest,
+                hrRestSource: hrRestSource,
                 hrMax: hrMax,
                 hrMaxSource: hrMaxSource,
                 fcSv1: fcSv1,
@@ -4717,6 +5424,403 @@ typedef $$DailyEntriesTableProcessedTableManager =
       DailyEntry,
       PrefetchHooks Function()
     >;
+typedef $$HooperMackinnonEntriesTableCreateCompanionBuilder =
+    HooperMackinnonEntriesCompanion Function({
+      Value<int> id,
+      required int sessionId,
+      required String userId,
+      required int fatigue,
+      required int stress,
+      required int doms,
+      required int sleep,
+      required DateTime recordedAt,
+    });
+typedef $$HooperMackinnonEntriesTableUpdateCompanionBuilder =
+    HooperMackinnonEntriesCompanion Function({
+      Value<int> id,
+      Value<int> sessionId,
+      Value<String> userId,
+      Value<int> fatigue,
+      Value<int> stress,
+      Value<int> doms,
+      Value<int> sleep,
+      Value<DateTime> recordedAt,
+    });
+
+final class $$HooperMackinnonEntriesTableReferences
+    extends
+        BaseReferences<
+          _$AppDatabase,
+          $HooperMackinnonEntriesTable,
+          HooperMackinnonEntry
+        > {
+  $$HooperMackinnonEntriesTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $SessionsTable _sessionIdTable(_$AppDatabase db) =>
+      db.sessions.createAlias(
+        $_aliasNameGenerator(
+          db.hooperMackinnonEntries.sessionId,
+          db.sessions.id,
+        ),
+      );
+
+  $$SessionsTableProcessedTableManager get sessionId {
+    final $_column = $_itemColumn<int>('session_id')!;
+
+    final manager = $$SessionsTableTableManager(
+      $_db,
+      $_db.sessions,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_sessionIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$HooperMackinnonEntriesTableFilterComposer
+    extends Composer<_$AppDatabase, $HooperMackinnonEntriesTable> {
+  $$HooperMackinnonEntriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get fatigue => $composableBuilder(
+    column: $table.fatigue,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get stress => $composableBuilder(
+    column: $table.stress,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get doms => $composableBuilder(
+    column: $table.doms,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sleep => $composableBuilder(
+    column: $table.sleep,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get recordedAt => $composableBuilder(
+    column: $table.recordedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$SessionsTableFilterComposer get sessionId {
+    final $$SessionsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sessionId,
+      referencedTable: $db.sessions,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SessionsTableFilterComposer(
+            $db: $db,
+            $table: $db.sessions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$HooperMackinnonEntriesTableOrderingComposer
+    extends Composer<_$AppDatabase, $HooperMackinnonEntriesTable> {
+  $$HooperMackinnonEntriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get fatigue => $composableBuilder(
+    column: $table.fatigue,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get stress => $composableBuilder(
+    column: $table.stress,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get doms => $composableBuilder(
+    column: $table.doms,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sleep => $composableBuilder(
+    column: $table.sleep,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get recordedAt => $composableBuilder(
+    column: $table.recordedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$SessionsTableOrderingComposer get sessionId {
+    final $$SessionsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sessionId,
+      referencedTable: $db.sessions,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SessionsTableOrderingComposer(
+            $db: $db,
+            $table: $db.sessions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$HooperMackinnonEntriesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $HooperMackinnonEntriesTable> {
+  $$HooperMackinnonEntriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<int> get fatigue =>
+      $composableBuilder(column: $table.fatigue, builder: (column) => column);
+
+  GeneratedColumn<int> get stress =>
+      $composableBuilder(column: $table.stress, builder: (column) => column);
+
+  GeneratedColumn<int> get doms =>
+      $composableBuilder(column: $table.doms, builder: (column) => column);
+
+  GeneratedColumn<int> get sleep =>
+      $composableBuilder(column: $table.sleep, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get recordedAt => $composableBuilder(
+    column: $table.recordedAt,
+    builder: (column) => column,
+  );
+
+  $$SessionsTableAnnotationComposer get sessionId {
+    final $$SessionsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sessionId,
+      referencedTable: $db.sessions,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SessionsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.sessions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$HooperMackinnonEntriesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $HooperMackinnonEntriesTable,
+          HooperMackinnonEntry,
+          $$HooperMackinnonEntriesTableFilterComposer,
+          $$HooperMackinnonEntriesTableOrderingComposer,
+          $$HooperMackinnonEntriesTableAnnotationComposer,
+          $$HooperMackinnonEntriesTableCreateCompanionBuilder,
+          $$HooperMackinnonEntriesTableUpdateCompanionBuilder,
+          (HooperMackinnonEntry, $$HooperMackinnonEntriesTableReferences),
+          HooperMackinnonEntry,
+          PrefetchHooks Function({bool sessionId})
+        > {
+  $$HooperMackinnonEntriesTableTableManager(
+    _$AppDatabase db,
+    $HooperMackinnonEntriesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$HooperMackinnonEntriesTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$HooperMackinnonEntriesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$HooperMackinnonEntriesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> sessionId = const Value.absent(),
+                Value<String> userId = const Value.absent(),
+                Value<int> fatigue = const Value.absent(),
+                Value<int> stress = const Value.absent(),
+                Value<int> doms = const Value.absent(),
+                Value<int> sleep = const Value.absent(),
+                Value<DateTime> recordedAt = const Value.absent(),
+              }) => HooperMackinnonEntriesCompanion(
+                id: id,
+                sessionId: sessionId,
+                userId: userId,
+                fatigue: fatigue,
+                stress: stress,
+                doms: doms,
+                sleep: sleep,
+                recordedAt: recordedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int sessionId,
+                required String userId,
+                required int fatigue,
+                required int stress,
+                required int doms,
+                required int sleep,
+                required DateTime recordedAt,
+              }) => HooperMackinnonEntriesCompanion.insert(
+                id: id,
+                sessionId: sessionId,
+                userId: userId,
+                fatigue: fatigue,
+                stress: stress,
+                doms: doms,
+                sleep: sleep,
+                recordedAt: recordedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$HooperMackinnonEntriesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({sessionId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (sessionId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.sessionId,
+                                referencedTable:
+                                    $$HooperMackinnonEntriesTableReferences
+                                        ._sessionIdTable(db),
+                                referencedColumn:
+                                    $$HooperMackinnonEntriesTableReferences
+                                        ._sessionIdTable(db)
+                                        .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$HooperMackinnonEntriesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $HooperMackinnonEntriesTable,
+      HooperMackinnonEntry,
+      $$HooperMackinnonEntriesTableFilterComposer,
+      $$HooperMackinnonEntriesTableOrderingComposer,
+      $$HooperMackinnonEntriesTableAnnotationComposer,
+      $$HooperMackinnonEntriesTableCreateCompanionBuilder,
+      $$HooperMackinnonEntriesTableUpdateCompanionBuilder,
+      (HooperMackinnonEntry, $$HooperMackinnonEntriesTableReferences),
+      HooperMackinnonEntry,
+      PrefetchHooks Function({bool sessionId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -4733,4 +5837,9 @@ class $AppDatabaseManager {
       $$ProfileTableTableManager(_db, _db.profile);
   $$DailyEntriesTableTableManager get dailyEntries =>
       $$DailyEntriesTableTableManager(_db, _db.dailyEntries);
+  $$HooperMackinnonEntriesTableTableManager get hooperMackinnonEntries =>
+      $$HooperMackinnonEntriesTableTableManager(
+        _db,
+        _db.hooperMackinnonEntries,
+      );
 }

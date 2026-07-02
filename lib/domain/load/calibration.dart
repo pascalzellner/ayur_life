@@ -66,12 +66,47 @@ int? estimateAerobicCeilingKarvonen({
   return (hrRest + fraction * fcr).round();
 }
 
+// ── Zones Karvonen complètes (5 zones) ───────────────────────────────────────
+
+/// Calcule les 5 zones Karvonen depuis les paramètres cardiaques.
+///
+/// Toutes les bornes utilisent [.round()] — jamais de troncature entière.
+/// La borne haute de Z2 est identique à [aerobicCeiling] (garde-fou Intensité).
+///
+/// Zone | Plage FCR | Description
+/// ---- | --------- | -----------
+/// Z1   | 50–60 %   | Récupération
+/// Z2   | 60–70 %   | Endurance fondamentale ← plafond aérobie (garde-fou)
+/// Z3   | 70–80 %   | Tempo
+/// Z4   | 80–90 %   | Seuil anaérobie
+/// Z5   | 90–100 %  | VO2max
+List<HrZone> _karvonenZones(int hrRest, int hrMax, ThresholdProvenance prov) {
+  final fcr = hrMax - hrRest;
+  int b(double f) => (hrRest + f * fcr).round();
+
+  final z1Max = b(0.60);
+  final z2Max = b(0.70); // = aerobicCeiling
+  final z3Max = b(0.80);
+  final z4Max = b(0.90);
+
+  return [
+    HrZone(label: 'Z1 — Récupération',          minBpm: b(0.50),  maxBpm: z1Max, provenance: prov),
+    HrZone(label: 'Z2 — Endurance fondamentale', minBpm: z1Max + 1, maxBpm: z2Max, provenance: prov),
+    HrZone(label: 'Z3 — Tempo',                 minBpm: z2Max + 1, maxBpm: z3Max, provenance: prov),
+    HrZone(label: 'Z4 — Seuil anaérobie',       minBpm: z3Max + 1, maxBpm: z4Max, provenance: prov),
+    HrZone(label: 'Z5 — VO2max',                minBpm: z4Max + 1, maxBpm: hrMax, provenance: prov),
+  ];
+}
+
 // ── Point d'entrée principal ──────────────────────────────────────────────────
 
 /// Dérive les zones et le plafond aérobie depuis les données de profil.
 ///
 /// Priorité : seuils mesurés mode B > estimation Karvonen.
 /// La provenance suit toujours chaque valeur.
+///
+/// Chemin Karvonen : 5 zones complètes (Z1–Z5).
+/// Chemin SV1 mesuré : 2 zones (sous-SV1 / supra-SV1).
 CalibrationResult? computeZones({
   required int? age,
   required int? hrRest,
@@ -110,21 +145,17 @@ CalibrationResult? computeZones({
     ceilingProv = ThresholdProvenance.estimatedKarvonen;
   }
 
-  // Zones (simplifiées phase 1 : Z1 sous SV1, Z2 supra-SV1)
-  final zones = [
-    HrZone(
-      label: 'Z1 — Aérobie léger',
-      minBpm: hrRest,
-      maxBpm: aerobicCeiling,
-      provenance: ceilingProv,
-    ),
-    HrZone(
-      label: 'Z2 — Supra-aérobie',
-      minBpm: aerobicCeiling + 1,
-      maxBpm: resolvedHrMax,
-      provenance: ceilingProv,
-    ),
-  ];
+  // Karvonen estimé → 5 zones complètes.
+  // Seuil mesuré (mode B / lab) → 2 zones autour du seuil physiologique.
+  final List<HrZone> zones;
+  if (ceilingProv == ThresholdProvenance.estimatedKarvonen) {
+    zones = _karvonenZones(hrRest, resolvedHrMax, ceilingProv);
+  } else {
+    zones = [
+      HrZone(label: 'Z1 — Sous SV1 (aérobie)',  minBpm: hrRest,             maxBpm: aerobicCeiling,    provenance: ceilingProv),
+      HrZone(label: 'Z2 — Supra-SV1',           minBpm: aerobicCeiling + 1, maxBpm: resolvedHrMax,     provenance: ceilingProv),
+    ];
+  }
 
   return CalibrationResult(
     aerobicCeiling: aerobicCeiling,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
@@ -14,7 +15,12 @@ import '../../data/foreground/foreground_service_manager.dart';
 import '../../data/local/app_database.dart';
 import '../../data/local/local_providers.dart';
 import '../../domain/load/calibration.dart';
+import '../../domain/load/intensity_guard.dart';
 import '../../domain/load/rpe.dart';
+import '../../domain/state/readiness.dart';
+
+// Phases du protocole Mode C (readiness du matin).
+enum _ModeCPhase { stabilisant, mesurant, questionnaire, resultat }
 
 class BleDebugScreen extends ConsumerStatefulWidget {
   const BleDebugScreen({super.key});
@@ -27,6 +33,11 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
   static const _teal = Color(0xFF1B9AAA);
   static const _orange = Color(0xFFEE8B2C);
 
+  // Durées protocole (s)
+  static const int _stabS = 60;
+  static const int _mesureS = 120;
+  static const int _totalS = _stabS + _mesureS; // 180
+
   // ── Profil ──────────────────────────────────────────────────────────────────
   final _ageCtrl = TextEditingController();
   final _poidsCtrl = TextEditingController();
@@ -38,11 +49,33 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
   bool _profilCharge = false;
   CalibrationResult? _calibration;
 
+  // ── Mode session (A = activité sportive, C = readiness, D = journée pro) ───
+  String _modeSession = 'D';
+
+  // ── Résumé post-session D (TRIMP + couverture) ───────────────────────────────
+  String? _dernierSummaireD;
+
   // ── RPE ─────────────────────────────────────────────────────────────────────
   String? _userId;
-  final _rpePhysCtrl = TextEditingController();    // CR10 session courante
-  final _rpePsychoCtrl = TextEditingController();  // CR10 psychologique du jour
-  final _rpeCompCtrl = TextEditingController();    // comparaison −2..+2
+  final _rpePhysCtrl = TextEditingController();
+  final _rpePsychoCtrl = TextEditingController();
+  final _rpeCompCtrl = TextEditingController();
+
+  // ── Mode C — protocole readiness du matin ───────────────────────────────────
+  _ModeCPhase? _modeCPhase;
+  int _modeCElapsedSec = 0;
+  Timer? _modeCTimer;
+  int? _modeCSessionId;
+  double _modeCRmssd = double.nan;
+  double _modeCMeanHr = double.nan;
+  double _modeCSd1 = double.nan;
+  double _modeCSd2 = double.nan;
+  int _hooperFatigue = 4;
+  int _hooperStress = 4;
+  int _hooperDoms = 4;
+  int _hooperSleep = 4;
+  String _modeCReadinessMsg = '';
+  int _modeCSessionCount = 0;
 
   @override
   void initState() {
@@ -52,6 +85,7 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
 
   @override
   void dispose() {
+    _modeCTimer?.cancel();
     _ageCtrl.dispose();
     _poidsCtrl.dispose();
     _tailleCtrl.dispose();
@@ -97,17 +131,61 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
   }
 
   Future<void> _sauvegarderProfil() async {
+    final fcRepos = int.tryParse(_fcReposCtrl.text.trim());
+    final fcMax = int.tryParse(_fcMaxCtrl.text.trim());
+
+    if (fcRepos != null && !isHrRestManualValid(fcRepos)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('FC de repos hors plage 35–100 bpm — valeur rejetée.'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
+    if (fcMax != null && !isHrMaxManualValid(fcMax)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('FC max hors plage 120–220 bpm — valeur rejetée.'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
+
+    if (fcRepos != null || fcMax != null) {
+      if (!mounted) return;
+      final confirme = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Valeur non mesurée'),
+          content: const Text(
+            'Ces valeurs ne sont pas issues d\'une mesure clinique. '
+            'Elles seront utilisées comme estimation de repli pour le '
+            'garde-fou Intensité.\n\nConfirmez-vous la saisie ?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Confirmer'),
+            ),
+          ],
+        ),
+      );
+      if (confirme != true || !mounted) return;
+    }
+
     final userId = await UserIdService.userId;
     final db = ref.read(appDatabaseProvider);
 
     final age = int.tryParse(_ageCtrl.text.trim());
     final poids = double.tryParse(_poidsCtrl.text.trim());
     final taille = double.tryParse(_tailleCtrl.text.trim());
-    final fcRepos = int.tryParse(_fcReposCtrl.text.trim());
-    final fcMax = int.tryParse(_fcMaxCtrl.text.trim());
 
     int? fcMaxResolu = fcMax;
-    String srcResolu = _hrMaxSource;
+    String srcResolu = fcMax != null ? 'manual' : _hrMaxSource;
     if (fcMaxResolu == null && age != null) {
       fcMaxResolu = estimateHrMaxTanaka(age);
       srcResolu = 'tanaka';
@@ -120,6 +198,7 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
       weightKg: Value(poids),
       heightCm: Value(taille),
       hrRest: Value(fcRepos),
+      hrRestSource: Value(fcRepos != null ? 'manual' : null),
       hrMax: Value(fcMaxResolu),
       hrMaxSource: Value(srcResolu),
       updatedAt: Value(DateTime.now()),
@@ -217,7 +296,7 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
             _banner('Active le Bluetooth pour scanner.', Colors.red.shade400),
           if (acq.status == ConnStatus.error && acq.error != null)
             _banner(acq.error!, Colors.red.shade400),
-          if (enregistrement)
+          if (enregistrement && _modeCPhase == null)
             _banner(
               '● Enregistrement actif — acquisition continue écran éteint.',
               _teal,
@@ -296,6 +375,7 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
     final rmssd = acq.rmssd.isNaN ? '—' : acq.rmssd.toStringAsFixed(1);
     final artifactPct = (acq.artifactRatio * 100).toStringAsFixed(1);
     final reconnecting = acq.status == ConnStatus.reconnecting;
+    final hrColor = (enregistrement && acq.isOverRef) ? Colors.red : _teal;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -324,37 +404,98 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
           ],
         ),
         const SizedBox(height: 12),
+
+        // Garde-fou (modes A/D uniquement)
+        if (enregistrement &&
+            acq.intensityRefBpm != null &&
+            _modeCPhase == null) ...[
+          _intensitePanel(acq),
+          const SizedBox(height: 8),
+        ],
+
+        // FC instantanée (toujours visible quand connecté)
         Center(
           child: Column(
             children: [
               Text('${acq.lastHr}',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 72,
                       fontWeight: FontWeight.bold,
-                      color: _teal)),
+                      color: hrColor)),
               const Text('bpm', style: TextStyle(color: Colors.grey)),
             ],
           ),
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            _metric('RMSSD', '$rmssd ms', _teal),
-            _metric('Artefacts', '$artifactPct %',
-                acq.artifactRatio > 0.05 ? Colors.red : _teal),
-            _metric('Battements', '${acq.beatsInWindow}', _orange),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (!enregistrement)
-          FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: _orange),
-            icon: const Icon(Icons.fiber_manual_record),
-            label: const Text('Démarrer enregistrement long'),
-            onPressed: () => _demarrerEnregistrement(),
+
+        // Métriques HRV (masquées pendant la stabilisation mode C)
+        if (_modeCPhase != _ModeCPhase.stabilisant) ...[
+          Row(
+            children: [
+              _metric('RMSSD', '$rmssd ms', _teal),
+              _metric('Artefacts', '$artifactPct %',
+                  acq.artifactRatio > 0.05 ? Colors.red : _teal),
+              _metric('Battements', '${acq.beatsInWindow}', _orange),
+            ],
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Panneau principal : Mode C OU commandes normales
+        if (_modeCPhase != null)
+          Expanded(
+            child: SafeArea(
+              top: false, // l'AppBar gère déjà le haut
+              child: _modeCPanel(_modeCPhase!, acq),
+            ),
           )
-        else ...[
-          // Saisie RPE physique avant l'arrêt
+        else if (!enregistrement) ...[
+          if (_dernierSummaireD != null) ...[
+            _banner(_dernierSummaireD!, _teal),
+          ],
+          // Sélecteur de mode
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              const Text('Mode : ', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('A — Activité'),
+                selected: _modeSession == 'A',
+                onSelected: (_) => setState(() => _modeSession = 'A'),
+                selectedColor: _orange.withValues(alpha: 0.2),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('C — Readiness'),
+                selected: _modeSession == 'C',
+                onSelected: (_) => setState(() => _modeSession = 'C'),
+                selectedColor: _teal.withValues(alpha: 0.2),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('D — Journée pro'),
+                selected: _modeSession == 'D',
+                onSelected: (_) => setState(() => _modeSession = 'D'),
+                selectedColor: _teal.withValues(alpha: 0.2),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+                backgroundColor: _modeSession == 'C' ? _teal : _orange),
+            icon: Icon(_modeSession == 'C'
+                ? Icons.bedtime_outlined
+                : Icons.fiber_manual_record),
+            label: Text(_modeSession == 'C'
+                ? 'Démarrer readiness du matin'
+                : 'Démarrer enregistrement'),
+            onPressed: _modeSession == 'C'
+                ? _demarrerModeC
+                : _demarrerEnregistrement,
+          ),
+        ] else ...[
           _champNum(
             'RPE physique CR10 (0–10) — à saisir avant d\'arrêter',
             _rpePhysCtrl,
@@ -364,33 +505,688 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
             style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
             icon: const Icon(Icons.stop),
             label: const Text('Arrêter enregistrement'),
-            onPressed: () => _arreterEnregistrement(),
+            onPressed: _arreterEnregistrement,
           ),
         ],
-        const SizedBox(height: 20),
-        const Text('Derniers RR (ms)',
-            style: TextStyle(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            if (acq.lastRrMs.isEmpty)
-              const Text('— pas de RR dans cette trame —',
-                  style: TextStyle(color: Colors.grey))
-            else
-              for (final rr in acq.lastRrMs)
-                Chip(
-                  backgroundColor:
-                      acq.lastWasArtifact ? Colors.red.shade50 : null,
-                  label: Text(rr.toStringAsFixed(0)),
+
+        if (_modeCPhase == null)
+          Expanded(
+            child: SafeArea(
+              top: false, // l'AppBar gère déjà le haut
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 20),
+                  const Text('Derniers RR (ms)',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (acq.lastRrMs.isEmpty)
+                        const Text('— pas de RR dans cette trame —',
+                            style: TextStyle(color: Colors.grey))
+                      else
+                        for (final rr in acq.lastRrMs)
+                          Chip(
+                            backgroundColor:
+                                acq.lastWasArtifact ? Colors.red.shade50 : null,
+                            label: Text(rr.toStringAsFixed(0)),
+                          ),
+                    ],
+                  ),
+                  const Spacer(),
+                  Text('Total battements reçus : ${acq.totalBeats}',
+                      style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════ MODE C ═══════════════════════════════════
+
+  void _demarrerModeC() {
+    _modeCTimer?.cancel();
+    setState(() {
+      _modeCPhase = _ModeCPhase.stabilisant;
+      _modeCElapsedSec = 0;
+      _modeCSessionId = null;
+      _modeCRmssd = double.nan;
+      _modeCMeanHr = double.nan;
+      _modeCSd1 = double.nan;
+      _modeCSd2 = double.nan;
+      _hooperFatigue = 4;
+      _hooperStress = 4;
+      _hooperDoms = 4;
+      _hooperSleep = 4;
+      _modeCReadinessMsg = '';
+      _modeCSessionCount = 0;
+    });
+    _modeCTimer = Timer.periodic(const Duration(seconds: 1), _modeCTick);
+  }
+
+  void _modeCTick(Timer t) {
+    if (!mounted) {
+      t.cancel();
+      return;
+    }
+    setState(() => _modeCElapsedSec++);
+
+    if (_modeCElapsedSec == _stabS) {
+      // Fin de stabilisation → démarrer l'enregistrement
+      _initialiserMesure();
+    } else if (_modeCElapsedSec >= _totalS) {
+      // Fin des 2 min de mesure
+      t.cancel();
+      _modeCTimer = null;
+      _finirMesureModeC();
+    }
+  }
+
+  Future<void> _initialiserMesure() async {
+    await ref.read(acquisitionProvider.notifier).startRecording(mode: 'C');
+    if (!mounted) return;
+
+    // Retrouver l'id de la session ouverte (mode C, sans endedAt)
+    final db = ref.read(appDatabaseProvider);
+    final sessions = await db.sessionDao.getAll();
+    final open = sessions
+        .where((s) => s.endedAt == null && s.mode == 'C')
+        .firstOrNull;
+
+    if (!mounted) return;
+    setState(() {
+      _modeCSessionId = open?.id;
+      _modeCPhase = _ModeCPhase.mesurant;
+    });
+  }
+
+  Future<void> _finirMesureModeC() async {
+    await ref.read(acquisitionProvider.notifier).stopRecording();
+    if (!mounted) return;
+
+    // Lire les indicateurs écrits par stopRecording
+    final db = ref.read(appDatabaseProvider);
+    final sid = _modeCSessionId;
+    if (sid != null) {
+      final indics = await db.indicatorDao.forSession(sid);
+      double find(String kind) {
+        for (final i in indics) {
+          if (i.kind == kind) return i.value;
+        }
+        return double.nan;
+      }
+
+      _modeCRmssd = find('rmssd');
+      _modeCMeanHr = find('meanHr');
+      _modeCSd1 = find('sd1');
+      _modeCSd2 = find('sd2');
+    }
+
+    if (!mounted) return;
+    setState(() => _modeCPhase = _ModeCPhase.questionnaire);
+  }
+
+  Future<void> _annulerModeC() async {
+    _modeCTimer?.cancel();
+    _modeCTimer = null;
+    // Appel systématique : no-op si aucune session n'est ouverte (phase
+    // stabilisant, T<60s), ferme proprement si une session est en cours.
+    // Couvre aussi la fenêtre de chevauchement entre le tick T=60 et le
+    // retour du setState de _initialiserMesure (phase encore stabilisant
+    // mais startRecording déjà appelé).
+    await ref.read(acquisitionProvider.notifier).stopRecording();
+    if (!mounted) return;
+    setState(() {
+      _modeCPhase = null;
+      _modeCElapsedSec = 0;
+      _modeCSessionId = null;
+    });
+  }
+
+  Future<void> _soumettreHooper() async {
+    final userId = _userId;
+    final sid = _modeCSessionId;
+    if (userId == null || sid == null) {
+      // Cas dégradé : pas d'id de session (mesure BLE interrompue), on saute.
+      if (mounted) setState(() => _modeCPhase = _ModeCPhase.resultat);
+      return;
+    }
+
+    final db = ref.read(appDatabaseProvider);
+    final now = DateTime.now();
+
+    // Persister l'entrée Hooper liée à la session
+    await db.hooperDao.insertEntry(HooperMackinnonEntriesCompanion.insert(
+      sessionId: sid,
+      userId: userId,
+      fatigue: _hooperFatigue,
+      stress: _hooperStress,
+      doms: _hooperDoms,
+      sleep: _hooperSleep,
+      recordedAt: now,
+    ));
+
+    // Récupérer l'historique pour les lignes de base
+    final allRmssd = await db.indicatorDao.getRmssdForModeC(userId);
+    final allHooper = await db.hooperDao.getAllByUser(userId);
+    final hooperScores = allHooper
+        .map((h) => (h.fatigue + h.stress + h.doms + h.sleep).toDouble())
+        .toList();
+
+    final rmssdBaseline = computeBaseline(allRmssd);
+    final hooperBaseline = computeBaseline(hooperScores);
+
+    final hooperTotal = computeHooperScore(
+      fatigue: _hooperFatigue,
+      stress: _hooperStress,
+      doms: _hooperDoms,
+      sleep: _hooperSleep,
+    );
+
+    final classification = classifyReadiness(
+      rmssdToday: _modeCRmssd,
+      rmssdBaseline: rmssdBaseline,
+      hooperScoreToday: hooperTotal.toDouble(),
+      hooperBaseline: hooperBaseline,
+    );
+
+    // Message adapté : si indicative, injecter le compteur réel.
+    final count = allRmssd.length; // inclut la séance du jour
+    final msg = classification == ReadinessClassification.indicative
+        ? 'Données en cours d\'accumulation ($count/${BaselineStats.minSessions} séances) '
+            '— les résultats seront comparatifs à partir de la séance ${BaselineStats.minSessions}.'
+        : readinessMessage(classification);
+
+    if (!mounted) return;
+    setState(() {
+      _modeCSessionCount = count;
+      _modeCReadinessMsg = msg;
+      _modeCPhase = _ModeCPhase.resultat;
+    });
+  }
+
+  // ── Panneaux Mode C ───────────────────────────────────────────────────────
+
+  Widget _modeCPanel(_ModeCPhase phase, AcquisitionState acq) {
+    return switch (phase) {
+      _ModeCPhase.stabilisant => _phaseStabilisant(),
+      _ModeCPhase.mesurant => _phaseMesurant(acq),
+      _ModeCPhase.questionnaire => _phaseQuestionnaire(),
+      _ModeCPhase.resultat => _phaseResultat(),
+    };
+  }
+
+  Widget _phaseStabilisant() {
+    final remaining = _stabS - _modeCElapsedSec;
+    final progress = _modeCElapsedSec / _stabS;
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          const Text(
+            'Stabilisation',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Reste immobile, respire calmement.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: 140,
+            height: 140,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  value: progress,
+                  strokeWidth: 8,
+                  color: _teal.withValues(alpha: 0.6),
+                  backgroundColor: Colors.grey.shade200,
                 ),
+                Text(
+                  '${remaining}s',
+                  style: const TextStyle(
+                      fontSize: 32, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'La mesure démarrera dans ${remaining}s',
+            style: const TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+          const SizedBox(height: 32),
+          OutlinedButton(
+            onPressed: _annulerModeC,
+            child: const Text('Annuler'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _phaseMesurant(AcquisitionState acq) {
+    final elapsed = _modeCElapsedSec - _stabS; // secondes écoulées depuis la mesure
+    final remaining = _mesureS - elapsed;
+    final progress = elapsed / _mesureS;
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          const Text(
+            'Mesure en cours',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Reste immobile. L\'app enregistre ta variabilité.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: 140,
+            height: 140,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  value: progress,
+                  strokeWidth: 8,
+                  color: _teal,
+                  backgroundColor: Colors.grey.shade200,
+                ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${remaining}s',
+                      style: const TextStyle(
+                          fontSize: 28, fontWeight: FontWeight.bold),
+                    ),
+                    const Text('restantes',
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Signal de qualité indicatif (sans valeur numérique brute)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: _teal.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  acq.artifactRatio > 0.3
+                      ? Icons.signal_cellular_alt_1_bar
+                      : acq.artifactRatio > 0.1
+                          ? Icons.signal_cellular_alt_2_bar
+                          : Icons.signal_cellular_alt,
+                  color: acq.artifactRatio > 0.3
+                      ? Colors.orange
+                      : _teal,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  acq.artifactRatio > 0.3
+                      ? 'Signal bruité — reste immobile'
+                      : 'Signal correct',
+                  style: TextStyle(
+                    color: acq.artifactRatio > 0.3
+                        ? Colors.orange.shade800
+                        : _teal,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+          OutlinedButton(
+            onPressed: _annulerModeC,
+            child: const Text('Annuler'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _phaseQuestionnaire() {
+    final hooperTotal = _hooperFatigue + _hooperStress + _hooperDoms + _hooperSleep;
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Comment tu te sens ce matin ?',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '1 = Excellent  ·  7 = Très mauvais',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          _hooperSlider(
+            'Fatigue générale',
+            _hooperFatigue,
+            (v) => setState(() => _hooperFatigue = v),
+          ),
+          _hooperSlider(
+            'Stress du matin',
+            _hooperStress,
+            (v) => setState(() => _hooperStress = v),
+          ),
+          _hooperSlider(
+            'Courbatures',
+            _hooperDoms,
+            (v) => setState(() => _hooperDoms = v),
+          ),
+          _hooperSlider(
+            'Qualité du sommeil',
+            _hooperSleep,
+            (v) => setState(() => _hooperSleep = v),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Score total',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                Text(
+                  '$hooperTotal / 28',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: hooperTotal > 20 ? Colors.red : _teal,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: _teal),
+            onPressed: _soumettreHooper,
+            child: const Text('Valider et voir le résultat'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _phaseResultat() {
+    final rmssdStr = _modeCRmssd.isNaN
+        ? '—'
+        : '${_modeCRmssd.toStringAsFixed(1)} ms';
+    final hrRestStr = _modeCMeanHr.isNaN
+        ? '—'
+        : '${_modeCMeanHr.round()} bpm';
+    final sd1Str = _modeCSd1.isNaN ? '—' : _modeCSd1.toStringAsFixed(1);
+    final sd2Str = _modeCSd2.isNaN ? '—' : _modeCSd2.toStringAsFixed(1);
+    final hooperTotal = _hooperFatigue + _hooperStress + _hooperDoms + _hooperSleep;
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Résultat du matin',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+
+          // Bloc HRV
+          _resultCard(
+            title: 'Variabilité cardiaque',
+            color: _teal,
+            children: [
+              _resultRow('RMSSD', rmssdStr),
+              _resultRow('FC repos mesurée', hrRestStr),
+              if (!_modeCSd1.isNaN) _resultRow('SD1 (Poincaré)', '$sd1Str ms'),
+              if (!_modeCSd2.isNaN) _resultRow('SD2 (Poincaré)', '$sd2Str ms'),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Bloc Hooper
+          _resultCard(
+            title: 'Ressenti du matin (Hooper)',
+            color: _orange,
+            children: [
+              _resultRow('Fatigue', '$_hooperFatigue/7'),
+              _resultRow('Stress', '$_hooperStress/7'),
+              _resultRow('Courbatures', '$_hooperDoms/7'),
+              _resultRow('Sommeil', '$_hooperSleep/7'),
+              const Divider(height: 16),
+              _resultRow('Score total', '$hooperTotal/28',
+                  bold: true,
+                  valueColor: hooperTotal > 20 ? Colors.red : _orange),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Bloc classification
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _teal.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _teal.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.insights, size: 18, color: _teal),
+                    const SizedBox(width: 6),
+                    const Text('Lecture du jour',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: _teal)),
+                    const Spacer(),
+                    // Progression vers la ligne de base (honnêteté PD-6)
+                    if (_modeCSessionCount < BaselineStats.minSessions)
+                      _badge(
+                        '$_modeCSessionCount/${BaselineStats.minSessions} séances',
+                        Colors.grey.shade600,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(_modeCReadinessMsg,
+                    style: const TextStyle(fontSize: 14, height: 1.5)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: _teal),
+            onPressed: () => setState(() {
+              _modeCPhase = null;
+              _modeSession = 'C'; // prêt pour la prochaine séance
+            }),
+            child: const Text('Terminer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _resultCard({
+    required String title,
+    required Color color,
+    required List<Widget> children,
+  }) =>
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, color: color, fontSize: 13)),
+            const SizedBox(height: 8),
+            ...children,
           ],
         ),
-        const Spacer(),
-        Text('Total battements reçus : ${acq.totalBeats}',
-            style: const TextStyle(color: Colors.grey, fontSize: 12)),
-      ],
+      );
+
+  Widget _resultRow(String label, String value,
+      {bool bold = false, Color? valueColor}) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: const TextStyle(fontSize: 13)),
+            Text(
+              value,
+              style: TextStyle(
+                fontWeight: bold ? FontWeight.bold : FontWeight.w600,
+                fontSize: 13,
+                color: valueColor,
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _hooperSlider(
+    String label,
+    int value,
+    ValueChanged<int> onChanged,
+  ) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w500)),
+                Text('$value / 7',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, color: _teal)),
+              ],
+            ),
+            Row(
+              children: [
+                const Text('1', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                Expanded(
+                  child: Slider(
+                    min: 1,
+                    max: 7,
+                    divisions: 6,
+                    value: value.toDouble(),
+                    activeColor: value >= 6 ? _orange : _teal,
+                    onChanged: (v) => onChanged(v.round()),
+                  ),
+                ),
+                const Text('7', style: TextStyle(fontSize: 11, color: Colors.grey)),
+              ],
+            ),
+          ],
+        ),
+      );
+
+  // ══════════════════════════ PANEL INTENSITÉ (modes A/D) ═══════════════════
+
+  Widget _intensitePanel(AcquisitionState acq) {
+    final refBpm = acq.intensityRefBpm!;
+    final label = acq.intensityRefLabel ?? '';
+    final overrun = acq.isOverRef;
+    final sec = acq.continuousOverrunSec;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: overrun ? Colors.red.shade50 : _teal.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: overrun ? Colors.red.shade300 : _teal.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            overrun ? Icons.warning_amber_rounded : Icons.speed,
+            color: overrun ? Colors.red : _teal,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Référence : $refBpm bpm  ($label)',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: overrun ? Colors.red.shade700 : _teal,
+                  ),
+                ),
+                if (overrun)
+                  Text(
+                    'Dépassement : ${sec}s continus',
+                    style:
+                        TextStyle(fontSize: 12, color: Colors.red.shade700),
+                  ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'Hors zone : ${acq.totalOverRefSec}s',
+                style: const TextStyle(fontSize: 11, color: Colors.red),
+              ),
+              Text(
+                'En zone : ${acq.totalUnderRefSec}s',
+                style: TextStyle(fontSize: 11, color: Colors.green.shade700),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -427,7 +1223,17 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
       if (!confirme || !mounted) return;
     }
 
-    await ref.read(acquisitionProvider.notifier).startRecording();
+    final check = await ref
+        .read(acquisitionProvider.notifier)
+        .startRecording(mode: _modeSession);
+
+    if (!mounted) return;
+
+    if (!check.allowed) {
+      await _dialogProfilIncomplet(check.missingFields);
+      return;
+    }
+
     final result = await manager.demarrerEnregistrement();
 
     if (!mounted) return;
@@ -438,12 +1244,35 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
     }
   }
 
+  Future<void> _dialogProfilIncomplet(List<String> champs) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Profil incomplet'),
+        content: Text(
+          'Pour démarrer le garde-fou Intensité, complète d\'abord '
+          'ces champs dans l\'onglet Profil :\n\n'
+          '${champs.map((c) => '• $c').join('\n')}',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _arreterEnregistrement() async {
     final db = ref.read(appDatabaseProvider);
-    await ref.read(foregroundServiceManagerProvider).arreterEnregistrement();
+
+    try {
+      await ref.read(foregroundServiceManagerProvider).arreterEnregistrement();
+    } catch (_) {}
+
     await ref.read(acquisitionProvider.notifier).stopRecording();
 
-    // Enregistrer le RPE physique saisi si valide
     final rpeVal = int.tryParse(_rpePhysCtrl.text.trim());
     if (rpeVal != null) {
       final sessions = await db.sessionDao.getAll();
@@ -453,6 +1282,33 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
       }
       _rpePhysCtrl.clear();
     }
+
+    if (mounted) _afficherSummaireD();
+  }
+
+  Future<void> _afficherSummaireD() async {
+    final db = ref.read(appDatabaseProvider);
+    final sessions = await db.sessionDao.getAll();
+    final lastD = sessions
+        .where((s) => s.mode == 'D' && s.endedAt != null)
+        .firstOrNull;
+    if (lastD == null || !mounted) return;
+
+    final indics = await db.indicatorDao.forSession(lastD.id);
+    final trimp =
+        indics.where((i) => i.kind == 'trimp_banister').firstOrNull?.value;
+    final coverage =
+        indics.where((i) => i.kind == 'data_coverage_ratio').firstOrNull?.value;
+
+    if (trimp == null || !mounted) return;
+
+    final pct = coverage != null ? (coverage * 100).round() : 100;
+    setState(() {
+      _dernierSummaireD = (coverage != null && pct < 100)
+          ? 'TRIMP Banister : ${trimp.toStringAsFixed(1)} UA — '
+              'calculé sur $pct% de la séance (${ (100 - pct)}% coupures capteur).'
+          : 'TRIMP Banister : ${trimp.toStringAsFixed(1)} UA — couverture complète.';
+    });
   }
 
   Future<bool> _dialogBatterie(ForegroundServiceManager manager) async {
@@ -497,12 +1353,12 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
     if (!_profilCharge) {
       return const Center(child: CircularProgressIndicator());
     }
+    final sessionActive = ref.watch(acquisitionProvider).isSessionActive;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Profil physiologique ──────────────────────────────────────────
           const Text('Profil & calibration',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
@@ -533,10 +1389,19 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
             ),
           ),
           const SizedBox(height: 12),
+          if (sessionActive)
+            _banner(
+              'Séance en cours — modification impossible.',
+              Colors.orange.shade700,
+            ),
           Row(children: [
-            Expanded(child: _champNum('FC repos (bpm)', _fcReposCtrl)),
+            Expanded(
+                child: _champNum('FC repos (bpm)', _fcReposCtrl,
+                    enabled: !sessionActive)),
             const SizedBox(width: 12),
-            Expanded(child: _champNum('FC max (bpm)', _fcMaxCtrl)),
+            Expanded(
+                child: _champNum('FC max (bpm)', _fcMaxCtrl,
+                    enabled: !sessionActive)),
           ]),
           const SizedBox(height: 8),
           Text(
@@ -556,7 +1421,6 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
             _calibrationCard(_calibration!),
           ],
 
-          // ── RPE du jour ───────────────────────────────────────────────────
           const SizedBox(height: 28),
           const Divider(),
           const SizedBox(height: 8),
@@ -570,17 +1434,10 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
           ),
           const SizedBox(height: 12),
           Row(children: [
-            Expanded(
-                child: _champNum(
-              'RPE psycho (0–10)',
-              _rpePsychoCtrl,
-            )),
+            Expanded(child: _champNum('RPE psycho (0–10)', _rpePsychoCtrl)),
             const SizedBox(width: 12),
             Expanded(
-                child: _champNumSigne(
-              'Comparaison (−2..+2)',
-              _rpeCompCtrl,
-            )),
+                child: _champNumSigne('Comparaison (−2..+2)', _rpeCompCtrl)),
           ]),
           const SizedBox(height: 12),
           FilledButton(
@@ -589,7 +1446,6 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
             child: const Text('Sauvegarder RPE du jour'),
           ),
 
-          // ── Read-back entrées journalières ────────────────────────────────
           const SizedBox(height: 20),
           if (_userId != null) _dailyEntriesReadBack(_userId!),
         ],
@@ -598,11 +1454,13 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
   }
 
   Widget _dailyEntriesReadBack(String userId) {
-    final db = ref.watch(appDatabaseProvider);
-    return StreamBuilder<List<DailyEntry>>(
-      stream: db.dailyEntryDao.watchRecent(userId),
-      builder: (context, snap) {
-        final entries = snap.data ?? [];
+    return ref.watch(dailyEntriesHistoryProvider(userId)).when(
+      loading: () => const Text(
+        'Aucune entrée journalière.',
+        style: TextStyle(color: Colors.grey, fontSize: 12),
+      ),
+      error: (_, _) => const SizedBox.shrink(),
+      data: (entries) {
         if (entries.isEmpty) {
           return const Text(
             'Aucune entrée journalière.',
@@ -641,9 +1499,10 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
   }
 
   Widget _champNum(String label, TextEditingController ctrl,
-          {bool decimal = false}) =>
+          {bool decimal = false, bool enabled = true}) =>
       TextField(
         controller: ctrl,
+        enabled: enabled,
         keyboardType:
             TextInputType.numberWithOptions(decimal: decimal, signed: false),
         inputFormatters: [
@@ -697,7 +1556,19 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
           for (final z in calib.zones)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Text('${z.label} : ${z.minBpm}–${z.maxBpm} bpm'),
+              child: z.maxBpm == calib.aerobicCeiling
+                  ? Text.rich(TextSpan(children: [
+                      TextSpan(
+                        text: '${z.label} : ${z.minBpm}–${z.maxBpm} bpm',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, color: _teal),
+                      ),
+                      const TextSpan(
+                        text: '  ← garde-fou actif',
+                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                    ]))
+                  : Text('${z.label} : ${z.minBpm}–${z.maxBpm} bpm'),
             ),
         ],
       ),
@@ -707,14 +1578,11 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
   // ═══════════════════════════════ ONGLET HISTORIQUE ════════════════════════
 
   Widget _historiqueTab() {
-    final db = ref.watch(appDatabaseProvider);
-    return StreamBuilder<List<Session>>(
-      stream: db.sessionDao.watchAll(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final sessions = snap.data ?? [];
+    final db = ref.read(appDatabaseProvider);
+    return ref.watch(sessionsHistoryProvider).when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('Erreur : $e')),
+      data: (sessions) {
         if (sessions.isEmpty) {
           return const Center(
             child: Text(
@@ -742,7 +1610,6 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
     final dureeStr = duree != null ? _formatDuree(duree) : 'en cours…';
     final qualite = '${(s.qualityRatio * 100).toStringAsFixed(0)} % qualité';
 
-    // Foster : RPE × durée (uniquement si les deux sont disponibles)
     String fosterStr = '';
     if (s.rpePhysical != null && duree != null) {
       final charge = fosterLoad(s.rpePhysical!, duree);
@@ -789,8 +1656,7 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
                     children: [
                       Text(ind.kind),
                       Text(ind.value.toStringAsFixed(2),
-                          style:
-                              const TextStyle(fontWeight: FontWeight.w600)),
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),

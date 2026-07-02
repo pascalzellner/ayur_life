@@ -381,6 +381,146 @@ void main() {
     });
   });
 
+  // ── HooperMackinnonEntries ───────────────────────────────────────────────
+  group('HooperMackinnonEntries', () {
+    test('insert + forSession : aller-retour complet', () async {
+      final db = _memDb();
+      addTearDown(db.close);
+      final now = DateTime(2026, 7, 1, 7, 30);
+
+      final sid = await db.sessionDao.insertSession(
+        SessionsCompanion.insert(userId: 'u1', mode: 'C', startedAt: now),
+      );
+
+      await db.hooperDao.insertEntry(
+        HooperMackinnonEntriesCompanion.insert(
+          sessionId: sid,
+          userId: 'u1',
+          fatigue: 3,
+          stress: 2,
+          doms: 4,
+          sleep: 5,
+          recordedAt: now,
+        ),
+      );
+
+      final entry = await db.hooperDao.forSession(sid);
+      expect(entry, isNotNull);
+      expect(entry!.fatigue, 3);
+      expect(entry.stress, 2);
+      expect(entry.doms, 4);
+      expect(entry.sleep, 5);
+      // Score total = 14
+      expect(entry.fatigue + entry.stress + entry.doms + entry.sleep, 14);
+    });
+
+    test('getAllByUser retourne toutes les entrées, plus récente en premier', () async {
+      final db = _memDb();
+      addTearDown(db.close);
+
+      for (var i = 1; i <= 3; i++) {
+        final t = DateTime(2026, 7, i, 7, 0);
+        final sid = await db.sessionDao.insertSession(
+          SessionsCompanion.insert(userId: 'u1', mode: 'C', startedAt: t),
+        );
+        await db.hooperDao.insertEntry(
+          HooperMackinnonEntriesCompanion.insert(
+            sessionId: sid,
+            userId: 'u1',
+            fatigue: i,
+            stress: 1,
+            doms: 1,
+            sleep: 1,
+            recordedAt: t,
+          ),
+        );
+      }
+
+      final entries = await db.hooperDao.getAllByUser('u1');
+      expect(entries.length, 3);
+      // Ordre décroissant : recordedAt le plus récent en premier
+      expect(entries.first.recordedAt, DateTime(2026, 7, 3, 7, 0));
+      expect(entries.last.recordedAt, DateTime(2026, 7, 1, 7, 0));
+    });
+
+    test('forSession retourne null si aucune entrée', () async {
+      final db = _memDb();
+      addTearDown(db.close);
+
+      final sid = await db.sessionDao.insertSession(
+        SessionsCompanion.insert(
+            userId: 'u1', mode: 'C', startedAt: DateTime(2026, 7, 1)),
+      );
+
+      expect(await db.hooperDao.forSession(sid), isNull);
+    });
+
+    test('getRmssdForModeC renvoie uniquement les RMSSD des séances mode C', () async {
+      final db = _memDb();
+      addTearDown(db.close);
+      final base = DateTime(2026, 7, 1, 7, 0);
+
+      // Deux séances mode C
+      for (var i = 0; i < 3; i++) {
+        final t = base.add(Duration(days: i));
+        final sid = await db.sessionDao.insertSession(
+          SessionsCompanion.insert(userId: 'u1', mode: 'C', startedAt: t),
+        );
+        await db.indicatorDao.insertAll([
+          IndicatorsCompanion.insert(sessionId: sid, kind: 'rmssd',
+              value: 40.0 + i, at: t),
+        ]);
+      }
+
+      // Une séance mode A (ne doit PAS apparaître)
+      final sidA = await db.sessionDao.insertSession(
+        SessionsCompanion.insert(userId: 'u1', mode: 'A', startedAt: base),
+      );
+      await db.indicatorDao.insertAll([
+        IndicatorsCompanion.insert(sessionId: sidA, kind: 'rmssd',
+            value: 99.0, at: base),
+      ]);
+
+      final values = await db.indicatorDao.getRmssdForModeC('u1');
+      expect(values.length, 3);
+      expect(values, everyElement(lessThan(50.0))); // 40, 41, 42 — pas 99
+    });
+
+    test('setHrRestFromModeC écrit hrRest avec source mode_c', () async {
+      final db = _memDb();
+      addTearDown(db.close);
+
+      await db.profileDao.setHrRestFromModeC('u1', 58);
+
+      final p = await db.profileDao.getProfile('u1');
+      expect(p, isNotNull);
+      expect(p!.hrRest, 58);
+      expect(p.hrRestSource, 'mode_c');
+    });
+
+    test('setHrRestFromModeC met à jour si profil déjà existant', () async {
+      final db = _memDb();
+      addTearDown(db.close);
+
+      // Profil initial avec hrRest manuel
+      await db.profileDao.upsertProfile(ProfileCompanion.insert(
+        userId: 'u1',
+        hrRest: const Value(55),
+        hrRestSource: const Value('manual'),
+        updatedAt: DateTime(2026, 7, 1),
+      ));
+
+      await db.profileDao.setHrRestFromModeC('u1', 52);
+
+      final p = await db.profileDao.getProfile('u1');
+      expect(p!.hrRest, 52);
+      expect(p.hrRestSource, 'mode_c');
+
+      // Toujours une seule ligne
+      expect((await db.select(db.profile).get()).length, 1);
+    });
+  });
+
   // ── DailyEntries ─────────────────────────────────────────────────────────
   group('DailyEntries', () {
     test('upsert crée une entrée pour le jour', () async {

@@ -102,6 +102,14 @@ class ForegroundServiceManager {
     return result;
   }
 
+  /// Signale un dépassement de la FC de référence dans la notification persistante.
+  void signalerAlerte(String message) {
+    FlutterForegroundTask.updateService(
+      notificationTitle: '⚠️ Ayur Life — Dépassement',
+      notificationText: message,
+    );
+  }
+
   /// Met à jour la notification avec la FC et le RMSSD en direct, cadencé à 3 s max
   /// pour éviter de saturer le binder Android à chaque battement.
   void mettreAJourNotification({required int hr, required double rmssd}) {
