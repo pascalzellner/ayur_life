@@ -457,6 +457,153 @@ void main() {
     });
   });
 
+  group('computeRrTimestamps', () {
+    test('1 RR → timestamp = fin du paquet', () {
+      expect(computeRrTimestamps([800.0], 3000), [3000]);
+    });
+
+    test('liste vide → liste vide', () {
+      expect(computeRrTimestamps([], 5000), isEmpty);
+    });
+
+    test('3 RR → timestamps distincts, décroissants vers le passé', () {
+      // [rr0=800, rr1=810, rr2=790], tMsEnd=5000
+      // ts[2]=5000, ts[1]=5000−790=4210, ts[0]=5000−790−810=3400
+      final ts = computeRrTimestamps([800.0, 810.0, 790.0], 5000);
+      expect(ts, hasLength(3));
+      expect(ts[2], 5000);
+      expect(ts[1], 5000 - 790);    // 4210
+      expect(ts[0], 5000 - 790 - 810); // 3400
+      expect(ts.toSet(), hasLength(3)); // tous distincts
+    });
+
+    test('ordre strictement croissant sur N valeurs', () {
+      final ts = computeRrTimestamps([850.0, 860.0, 840.0, 870.0], 10000);
+      for (var i = 0; i < ts.length - 1; i++) {
+        expect(ts[i] < ts[i + 1], isTrue,
+            reason: 'ts[$i]=${ts[i]} doit être < ts[${i+1}]=${ts[i+1]}');
+      }
+    });
+
+    test('arrondi : RR=800.6 → contributtion de 801 ms dans le cumul', () {
+      // ts[1]=1000, ts[0]=1000−round(800.6)=1000−801=199
+      final ts = computeRrTimestamps([799.4, 800.6], 1000);
+      expect(ts[1], 1000);
+      expect(ts[0], 1000 - 801); // 199
+    });
+
+    test('invariant : somme des durées RR = intervalle couvert par le paquet', () {
+      // ts.last − ts.first + rr[0].round() == somme de tous les round(rr[i])
+      final rrs = [800.0, 810.0, 790.0];
+      final ts = computeRrTimestamps(rrs, 5000);
+      final covered = ts.last - ts.first + rrs.first.round();
+      final total = rrs.map((r) => r.round()).reduce((a, b) => a + b);
+      expect(covered, total);
+    });
+  });
+
+  group('AcquisitionController — autoCloseOnBleFailure', () {
+    late AppDatabase db;
+    late ProviderContainer container;
+
+    setUpAll(_mockPathProvider);
+
+    setUp(() async {
+      db = _memDb();
+      container = ProviderContainer(overrides: [
+        appDatabaseProvider.overrideWithValue(db),
+      ]);
+      await _upsertProfil(db);
+    });
+
+    tearDown(() async {
+      container.dispose();
+      await db.close();
+    });
+
+    test(
+        'autoCloseOnBleFailure pendant session active : '
+        'isSessionActive false, endedAt renseigné, message erreur distinct',
+        () async {
+      final ctrl = container.read(acquisitionProvider.notifier);
+
+      // Démarrer une session mode D (simule la session longue durée).
+      final check = await ctrl.startRecording(mode: 'D');
+      expect(check.allowed, isTrue);
+      expect(container.read(acquisitionProvider).isSessionActive, isTrue);
+
+      // Simuler l'épuisement des tentatives de reconnexion BLE.
+      await ctrl.autoCloseOnBleFailure();
+
+      // La session doit être clôturée proprement.
+      final state = container.read(acquisitionProvider);
+      expect(state.isSessionActive, isFalse,
+          reason: 'La bannière "Enregistrement actif" doit disparaître');
+      expect(state.status, ConnStatus.error);
+      expect(state.error,
+          contains('Session interrompue'),
+          reason: 'Message distinct du cas arrêt manuel');
+
+      // endedAt doit être renseigné en base.
+      final sessions = await db.sessionDao.getAll();
+      expect(sessions, hasLength(1));
+      expect(sessions.first.endedAt, isNotNull,
+          reason: 'La session ne doit pas rester orpheline');
+
+      // Les indicateurs finaux ont été écrits (flush avant closeSession).
+      final indics = await db.indicatorDao.forSession(sessions.first.id);
+      expect(indics.where((i) => i.kind == 'artifactRatio'), hasLength(1));
+      expect(indics.where((i) => i.kind == 'totalBeats'), hasLength(1));
+    });
+
+    test(
+        'autoCloseOnBleFailure sans session active : no-op, '
+        'aucune session créée, état inchangé',
+        () async {
+      final ctrl = container.read(acquisitionProvider.notifier);
+
+      // Pas de startRecording → _sessionId == null.
+      await ctrl.autoCloseOnBleFailure();
+
+      expect(await db.sessionDao.getAll(), isEmpty);
+      // Le statut reste à sa valeur initiale (idle) — pas d'erreur parasite.
+      expect(
+          container.read(acquisitionProvider).status, ConnStatus.idle);
+    });
+
+    test(
+        'autoCloseOnBleFailure : état intensityRef réinitialisé '
+        '(plus de garde-fou résiduel)',
+        () async {
+      final ctrl = container.read(acquisitionProvider.notifier);
+      await ctrl.startRecording(mode: 'D');
+
+      await ctrl.autoCloseOnBleFailure();
+
+      final state = container.read(acquisitionProvider);
+      expect(state.intensityRefBpm, isNull);
+      expect(state.intensityRefLabel, isNull);
+      expect(state.isOverRef, isFalse);
+    });
+
+    test(
+        'arrêt manuel après autoCloseOnBleFailure : stopRecording no-op '
+        '— pas de double-clôture',
+        () async {
+      final ctrl = container.read(acquisitionProvider.notifier);
+      await ctrl.startRecording(mode: 'D');
+      await ctrl.autoCloseOnBleFailure();
+
+      // Un appel tardif de stopRecording (ex. depuis le bouton UI) doit être
+      // un no-op — _sessionId est déjà null.
+      await ctrl.stopRecording();
+
+      // Toujours une seule session en base.
+      expect(await db.sessionDao.getAll(), hasLength(1));
+      expect(container.read(acquisitionProvider).isSessionActive, isFalse);
+    });
+  });
+
   group('sessionsHistoryProvider — stream stable', () {
     late AppDatabase db;
     late ProviderContainer container;

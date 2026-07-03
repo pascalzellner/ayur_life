@@ -632,6 +632,7 @@ void main() {
 
     test('rpeComparison −2 et +2 sont stockés fidèlement', () async {
       final db = _memDb();
+
       addTearDown(db.close);
 
       await db.dailyEntryDao.upsertEntry(
@@ -656,5 +657,260 @@ void main() {
       expect(e1!.rpeComparison, -2);
       expect(e2!.rpeComparison, 2);
     });
+  });
+
+  // ── AppDatabase.closeOrphanSessions ─────────────────────────────────────
+  group('AppDatabase.closeOrphanSessions', () {
+    test(
+      'session orpheline mode C sans RR : fermée, endedAt = startedAt',
+      () async {
+        final db = _memDb();
+        addTearDown(db.close);
+
+        final startedAt = DateTime(2026, 7, 1, 7, 0);
+        final sid = await db.sessionDao.insertSession(
+          SessionsCompanion.insert(
+            userId: 'u1',
+            mode: 'C',
+            startedAt: startedAt,
+          ),
+        );
+
+        await db.closeOrphanSessions();
+
+        final sessions = await db.sessionDao.getAll();
+        expect(sessions.first.endedAt, startedAt,
+            reason: 'Sans RR : endedAt = startedAt (crash immédiat)');
+        expect(sessions.first.qualityRatio, 0.0,
+            reason: 'qualityRatio = 0 : état HRV perdu lors du kill');
+
+        final indics = await db.indicatorDao.forSession(sid);
+        final kinds = indics.map((i) => i.kind).toSet();
+        expect(kinds, contains('shutdown_recovery'),
+            reason: 'Marqueur de provenance distinct arrêt manuel / échec BLE');
+        expect(kinds, contains('totalBeats'));
+        expect(indics.firstWhere((i) => i.kind == 'totalBeats').value, 0.0);
+      },
+    );
+
+    test(
+      'session orpheline mode D : endedAt = startedAt + dernier tMs, couverture ~100%',
+      () async {
+        // tMs = offset ms depuis startedAt (relatif, pas epoch absolu).
+        // 3 RR dans < 60 000 ms → 1 bucket minute → couverture 100%.
+        // lastTMs multiple de 1000 pour coller à la précision seconde de DateTimeColumn.
+        final db = _memDb();
+        addTearDown(db.close);
+
+        await db.profileDao.upsertProfile(ProfileCompanion.insert(
+          userId: 'u1',
+          hrRest: const Value(60),
+          hrMax: const Value(180),
+          sex: const Value('M'),
+          updatedAt: DateTime(2026, 7, 1),
+        ));
+
+        final startedAt = DateTime(2026, 7, 1, 9, 0);
+        const lastTMs = 2000; // 2 s après startedAt, multiple de 1000
+
+        final sid = await db.sessionDao.insertSession(
+          SessionsCompanion.insert(
+            userId: 'u1',
+            mode: 'D',
+            startedAt: startedAt,
+          ),
+        );
+
+        // RR flushés avant le kill (tMs = offset ms depuis startedAt)
+        await db.rrDao.insertBatch([
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 800, rr: 800.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 1600, rr: 800.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: lastTMs, rr: 800.0),
+        ]);
+
+        await db.closeOrphanSessions();
+
+        final sessions = await db.sessionDao.getAll();
+        expect(
+          sessions.first.endedAt,
+          startedAt.add(const Duration(milliseconds: lastTMs)),
+          reason: 'endedAt = startedAt + dernier tMs, pas DateTime.now()',
+        );
+
+        final indics = await db.indicatorDao.forSession(sid);
+        final byKind = {for (final i in indics) i.kind: i.value};
+        expect(byKind['shutdown_recovery'], 1.0);
+        expect(byKind['totalBeats'], 3.0);
+        expect(byKind['trimp_banister'], greaterThan(0),
+            reason: '3 battements à 75 bpm → TRIMP non nul');
+        expect(byKind['data_coverage_ratio'], closeTo(1.0, 0.01),
+            reason: 'Toutes les données dans 1 minute → couverture 100%');
+      },
+    );
+
+    test(
+      'session déjà fermée (endedAt non null) : non modifiée',
+      () async {
+        final db = _memDb();
+        addTearDown(db.close);
+
+        final closedAt = DateTime(2026, 7, 1, 10, 30);
+        final sid = await db.sessionDao.insertSession(
+          SessionsCompanion.insert(
+            userId: 'u1',
+            mode: 'A',
+            startedAt: DateTime(2026, 7, 1, 9, 0),
+            endedAt: Value(closedAt),
+          ),
+        );
+        await db.indicatorDao.insertAll([
+          IndicatorsCompanion.insert(
+              sessionId: sid, kind: 'rmssd', value: 42.0, at: closedAt),
+        ]);
+
+        await db.closeOrphanSessions();
+
+        final sessions = await db.sessionDao.getAll();
+        // endedAt inchangé (la session était déjà fermée)
+        expect(sessions.first.endedAt, closedAt);
+        // Aucun indicateur supplémentaire
+        final indics = await db.indicatorDao.forSession(sid);
+        expect(indics.length, 1);
+        expect(indics.map((i) => i.kind), isNot(contains('shutdown_recovery')));
+      },
+    );
+
+    test(
+      'plusieurs sessions orphelines : toutes fermées avec shutdown_recovery',
+      () async {
+        final db = _memDb();
+        addTearDown(db.close);
+
+        for (var i = 0; i < 3; i++) {
+          await db.sessionDao.insertSession(
+            SessionsCompanion.insert(
+              userId: 'u1',
+              mode: 'C',
+              startedAt: DateTime(2026, 7, i + 1, 7, 0),
+            ),
+          );
+        }
+
+        await db.closeOrphanSessions();
+
+        final sessions = await db.sessionDao.getAll();
+        expect(sessions.every((s) => s.endedAt != null), isTrue,
+            reason: 'Toutes les sessions orphelines doivent être fermées');
+
+        for (final s in sessions) {
+          final kinds =
+              (await db.indicatorDao.forSession(s.id)).map((i) => i.kind);
+          expect(kinds, contains('shutdown_recovery'));
+        }
+      },
+    );
+
+    test(
+      'closeOrphanSessions no-op sur base vide',
+      () async {
+        final db = _memDb();
+        addTearDown(db.close);
+
+        // Ne doit pas lever d'exception
+        await expectLater(db.closeOrphanSessions(), completes);
+        expect(await db.sessionDao.getAll(), isEmpty);
+      },
+    );
+  });
+
+  // ── RrSamples — contrainte UNIQUE {session_id, t_ms} ────────────────────
+  group('RrSamples — contrainte UNIQUE {session_id, t_ms}', () {
+    test(
+      'preuve de la cause 1 : timestamps identiques lèvent une exception',
+      () async {
+        // Avant le correctif, _onSample assignait le même tMs à tous les RR
+        // d'un même paquet BLE. Ce test prouve que la contrainte existe et
+        // qu'elle était systématiquement violée pour les paquets multi-RR.
+        final db = _memDb();
+        addTearDown(db.close);
+        final sid = await db.sessionDao.insertSession(
+          SessionsCompanion.insert(
+              userId: 'u1', mode: 'D', startedAt: DateTime.now()),
+        );
+
+        // Simuler l'ancienne logique : 3 RR, même tMs pour tous.
+        final rows = [
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 3000, rr: 800.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 3000, rr: 810.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 3000, rr: 790.0),
+        ];
+
+        await expectLater(
+          db.rrDao.insertBatch(rows),
+          throwsA(anything),
+          reason: 'Deux lignes avec le même (session_id, t_ms) doivent violer '
+              'la contrainte UNIQUE — prouve que la cause 1 était réelle.',
+        );
+      },
+    );
+
+    test(
+      'après correctif : 2 paquets de 3 RR chacun insèrent 6 lignes sans conflit',
+      () async {
+        // Les timestamps sont calculés comme computeRrTimestamps le fait :
+        // on remonte depuis la fin du paquet.
+        //
+        // Paquet 1 : [800, 810, 790], tMsEnd=3000
+        //   ts[2]=3000, ts[1]=3000−790=2210, ts[0]=3000−790−810=1400
+        //
+        // Paquet 2 : [820, 800, 810], tMsEnd=5430 (3000+800+810+820)
+        //   ts[2]=5430, ts[1]=5430−810=4620, ts[0]=5430−810−800=3820
+        final db = _memDb();
+        addTearDown(db.close);
+        final sid = await db.sessionDao.insertSession(
+          SessionsCompanion.insert(
+              userId: 'u1', mode: 'D', startedAt: DateTime.now()),
+        );
+
+        final rows = [
+          // Paquet 1
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 1400, rr: 800.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 2210, rr: 810.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 3000, rr: 790.0),
+          // Paquet 2
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 3820, rr: 820.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 4620, rr: 800.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 5430, rr: 810.0),
+        ];
+
+        await expectLater(db.rrDao.insertBatch(rows), completes);
+        expect(await db.rrDao.countForSession(sid), 6);
+      },
+    );
+
+    test(
+      'gap marker à tMs[0]−1 n\'entre pas en conflit avec les RR du paquet',
+      () async {
+        // Simulate gap marker + first packet after BLE reconnect.
+        // Gap marker at timestamps[0] - 1 = 1400 - 1 = 1399
+        final db = _memDb();
+        addTearDown(db.close);
+        final sid = await db.sessionDao.insertSession(
+          SessionsCompanion.insert(
+              userId: 'u1', mode: 'D', startedAt: DateTime.now()),
+        );
+
+        final rows = [
+          RrSamplesCompanion.insert(
+              sessionId: sid, tMs: 1399, rr: 0.0, gap: const Value(true)),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 1400, rr: 800.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 2210, rr: 810.0),
+          RrSamplesCompanion.insert(sessionId: sid, tMs: 3000, rr: 790.0),
+        ];
+
+        await expectLater(db.rrDao.insertBatch(rows), completes);
+        expect(await db.rrDao.countForSession(sid), 4);
+      },
+    );
   });
 }

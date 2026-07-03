@@ -34,4 +34,8 @@ class SessionDao extends DatabaseAccessor<AppDatabase> with _$SessionDaoMixin {
   Future<List<Session>> getAll() =>
       (select(sessions)..orderBy([(s) => OrderingTerm.desc(s.startedAt)]))
           .get();
+
+  /// Sessions dont endedAt est NULL — considérées orphelines au redémarrage.
+  Future<List<Session>> getOrphanSessions() =>
+      (select(sessions)..where((s) => s.endedAt.isNull())).get();
 }

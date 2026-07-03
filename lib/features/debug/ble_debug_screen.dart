@@ -1594,7 +1594,9 @@ class _BleDebugScreenState extends ConsumerState<BleDebugScreen> {
           );
         }
         return ListView.separated(
-          padding: const EdgeInsets.all(12),
+          padding: EdgeInsets.fromLTRB(
+            12, 12, 12, 12 + MediaQuery.of(context).padding.bottom,
+          ),
           itemCount: sessions.length,
           separatorBuilder: (_, _) => const Divider(height: 1),
           itemBuilder: (_, i) => _sessionTile(sessions[i], db),

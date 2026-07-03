@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +18,31 @@ import '../local/app_database.dart';
 import '../local/local_providers.dart';
 import 'ble_heart_rate_repository.dart';
 import 'heart_rate_parser.dart';
+
+/// Attribue un timestamp distinct (ms depuis début de séance) à chaque
+/// intervalle RR d'un paquet BLE.
+///
+/// Un paquet arrive à [tMsPacketEnd]. Il contient [rrMs] intervalles
+/// successifs ; le dernier se termine à [tMsPacketEnd]. On remonte dans le
+/// temps depuis la fin du paquet pour horodater chaque battement :
+///
+///   timestamps[N-1] = tMsPacketEnd
+///   timestamps[N-2] = tMsPacketEnd − round(rrMs[N-1])
+///   …
+///
+/// Garantit [rrMs.length] timestamps distincts, éliminant les violations de
+/// la contrainte UNIQUE (session_id, t_ms) de la table rr_samples.
+List<int> computeRrTimestamps(List<double> rrMs, int tMsPacketEnd) {
+  final n = rrMs.length;
+  if (n == 0) return [];
+  final timestamps = List<int>.filled(n, 0);
+  var cumul = 0;
+  for (var i = n - 1; i >= 0; i--) {
+    timestamps[i] = tMsPacketEnd - cumul;
+    cumul += rrMs[i].round();
+  }
+  return timestamps;
+}
 
 final bleRepositoryProvider = Provider<BleHeartRateRepository>(
   (ref) => BleHeartRateRepository(),
@@ -147,6 +173,15 @@ class AcquisitionController extends Notifier<AcquisitionState> {
   StreamSubscription<BluetoothConnectionState>? _connSub;
   bool _userWantsConnection = false;
 
+  // Nombre maximal de tentatives de reconnexion pendant une session active.
+  // Après épuisement, la session est clôturée automatiquement.
+  static const _maxReconnectAttempts = 3;
+  int _reconnectAttempts = 0;
+
+  // Taille maximale de _pendingRr entre deux flush (~8 min @ 60 bpm, 1 RR/batt.).
+  // Garde-fou contre une croissance illimitée si un problème DB persiste.
+  static const _maxPendingRr = 5000;
+
   // ── Persistance ───────────────────────────────────────────────────────────
   int? _sessionId;
   DateTime? _sessionStartedAt;
@@ -176,6 +211,7 @@ class AcquisitionController extends Notifier<AcquisitionState> {
 
   Future<void> connect(BluetoothDevice device) async {
     _userWantsConnection = true;
+    _reconnectAttempts = 0;
     _device = device;
     _hrv.reset();
     state = state.copyWith(
@@ -212,14 +248,19 @@ class AcquisitionController extends Notifier<AcquisitionState> {
         } catch (_) {}
         return;
       }
-      final battery = await _repo.readBattery(device);
+      _reconnectAttempts = 0; // succès — réinitialiser le compteur
 
+      // Souscrire AVANT readBattery pour minimiser la fenêtre de perte de
+      // notifications BLE entre connectAndResolve et l'écoute effective.
       await _sampleSub?.cancel();
       _sampleSub = _repo.samples(ch).listen(_onSample, onError: (e) {
         _sampleSub?.cancel();
         _sampleSub = null;
         state = state.copyWith(status: ConnStatus.error, error: e.toString());
       });
+
+      // Lecture batterie non-critique — après souscription.
+      final battery = await _repo.readBattery(device);
 
       state = state.copyWith(
         status: ConnStatus.connected,
@@ -230,8 +271,40 @@ class AcquisitionController extends Notifier<AcquisitionState> {
       try {
         await _repo.disconnect(device);
       } catch (_) {}
-      state = state.copyWith(status: ConnStatus.error, error: e.toString());
+
+      final sessionActive = _sessionId != null;
+      _reconnectAttempts++;
+
+      if (sessionActive &&
+          _reconnectAttempts < _maxReconnectAttempts &&
+          _userWantsConnection) {
+        // Backoff linéaire (2s, 4s) avant la prochaine tentative.
+        state = state.copyWith(status: ConnStatus.reconnecting);
+        await Future.delayed(Duration(seconds: 2 * _reconnectAttempts));
+        if (_userWantsConnection) await _tryConnect(device);
+      } else if (sessionActive &&
+          _reconnectAttempts >= _maxReconnectAttempts) {
+        // Échec définitif — clôture automatique de la session.
+        _reconnectAttempts = 0;
+        await autoCloseOnBleFailure();
+      } else {
+        // Première connexion sans session active — comportement original.
+        state = state.copyWith(status: ConnStatus.error, error: e.toString());
+      }
     }
+  }
+
+  /// Clôture automatique de la session après échec définitif de reconnexion BLE.
+  ///
+  /// Appelé par [_tryConnect] après épuisement de [_maxReconnectAttempts],
+  /// et directement par les tests pour couvrir ce chemin sans BLE réel.
+  Future<void> autoCloseOnBleFailure() async {
+    if (_sessionId == null) return;
+    await stopRecording();
+    state = state.copyWith(
+      status: ConnStatus.error,
+      error: 'Session interrompue — capteur perdu (reconnexion impossible).',
+    );
   }
 
   void _onSample(HeartRateSample sample) {
@@ -274,15 +347,29 @@ class AcquisitionController extends Notifier<AcquisitionState> {
 
     // ── Accumulation RR pour la persistance ─────────────────────────────────
     if (_sessionId != null && _sessionStartedAt != null) {
-      final tMs =
+      final rrs = sample.rrMs;
+      final tMsEnd =
           sample.receivedAt.difference(_sessionStartedAt!).inMilliseconds;
 
-      if (_needsGapMarker) {
-        _pendingRr.add((tMs: tMs, rr: 0.0, gap: true));
+      if (rrs.isNotEmpty) {
+        // Timestamp distinct par intervalle RR : on remonte depuis la fin du
+        // paquet pour respecter la PK {sessionId, tMs} de rr_samples.
+        final timestamps = computeRrTimestamps(rrs, tMsEnd);
+
+        if (_needsGapMarker) {
+          // Placer le marqueur juste avant le premier battement du paquet
+          // pour ne pas entrer en conflit avec la PK.
+          _pendingRr.add((tMs: timestamps.first - 1, rr: 0.0, gap: true));
+          _needsGapMarker = false;
+        }
+
+        for (var i = 0; i < rrs.length; i++) {
+          _pendingRr.add((tMs: timestamps[i], rr: rrs[i], gap: false));
+        }
+      } else if (_needsGapMarker) {
+        // Paquet FC sans RR (rare) — marquer le gap au tMsEnd du paquet.
+        _pendingRr.add((tMs: tMsEnd, rr: 0.0, gap: true));
         _needsGapMarker = false;
-      }
-      for (final rr in sample.rrMs) {
-        _pendingRr.add((tMs: tMs, rr: rr, gap: false));
       }
     }
   }
@@ -398,7 +485,20 @@ class AcquisitionController extends Notifier<AcquisitionState> {
 
     _flushTimer = Timer.periodic(
       Duration(seconds: AppConstants.rrFlushIntervalSeconds),
-      (_) => _flushPending(),
+      (_) async {
+        try {
+          await _flushPending();
+        } catch (e) {
+          debugPrint('[flush] Erreur insertBatch RR : $e');
+          // Garde-fou : limiter la croissance de _pendingRr si le problème
+          // DB persiste malgré les corrections.
+          if (_pendingRr.length > _maxPendingRr) {
+            final toDrop = _pendingRr.length - _maxPendingRr;
+            _pendingRr.removeRange(0, toDrop);
+            debugPrint('[flush] Garde-fou : $toDrop RR abandonnés (limite $_maxPendingRr)');
+          }
+        }
+      },
     );
 
     return const SessionStartCheck(ageMissing: false, hrRestMissing: false);
@@ -572,9 +672,9 @@ class AcquisitionController extends Notifier<AcquisitionState> {
     final sessionId = _sessionId;
     if (sessionId == null || _pendingRr.isEmpty) return;
 
+    // Snapshot avant l'await — les nouvelles entrées ajoutées pendant
+    // l'insertion restent en queue de _pendingRr.
     final toWrite = List.of(_pendingRr);
-    _pendingRr.clear();
-
     final rows = toWrite
         .map((e) => RrSamplesCompanion(
               sessionId: Value(sessionId),
@@ -584,17 +684,25 @@ class AcquisitionController extends Notifier<AcquisitionState> {
             ))
         .toList();
 
+    // Peut lever — on N'efface PAS _pendingRr avant la confirmation.
     await _db.rrDao.insertBatch(rows);
+
+    // Succès confirmé : retirer exactement les éléments écrits.
+    // Les entrées arrivées pendant l'await (en fin de liste) restent intactes.
+    _pendingRr.removeRange(0, toWrite.length);
   }
 
   Future<void> disconnect() async {
     _userWantsConnection = false;
+    _reconnectAttempts = 0;
     await _cleanup();
     state = const AcquisitionState(status: ConnStatus.idle);
   }
 
   Future<void> _cleanup() async {
-    await _flushPending();
+    try {
+      await _flushPending();
+    } catch (_) {}
     _flushTimer?.cancel();
     _flushTimer = null;
 
