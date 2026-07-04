@@ -544,7 +544,10 @@ class AcquisitionController extends Notifier<AcquisitionState> {
     // ── Étape 2 : indicateurs ────────────────────────────────────────────────
     final now = DateTime.now();
     final rmssd = _hrv.rmssd;
-    final meanHr = _hrv.meanHr;
+    // hrvMeanHr = accumulateur RR ; fiable au repos (mode C) mais biaisé
+    // en mouvement (artefacts → seuls les RR courts passent → sur-estimation).
+    // Modes A/D : meanHr sera recalculé depuis HrSamples (voir ci-dessous).
+    final hrvMeanHr = _hrv.meanHr;
     final artifactRatio = _hrv.artifactRatio;
     final totalBeats = _hrv.totalReceived;
     // Poincaré (mode C uniquement — mesure au repos stabilisé).
@@ -554,6 +557,27 @@ class AcquisitionController extends Notifier<AcquisitionState> {
     final sd2 = computeSd2(sdnn, sd1);
 
     try {
+      // Modes A/D : charger HrSamples une seule fois — sert à la fois pour
+      // meanHr (source correcte, non biaisée) et pour le TRIMP Banister.
+      // Mode C : pas de fetch HrSamples (meanHr vient de l'accumulateur RR).
+      final List<HrSample> rawHr;
+      if (modeAtStop == 'A' || modeAtStop == 'D') {
+        rawHr = await _db.hrDao.getForSession(sessionId);
+      } else {
+        rawHr = const [];
+      }
+
+      // meanHr stocké : HrSamples pour A/D, accumulateur RR pour C.
+      // null si la source est vide → indicateur non écrit (cohérent avec isNaN).
+      final double? meanHrToStore;
+      if (modeAtStop == 'A' || modeAtStop == 'D') {
+        meanHrToStore = rawHr.isNotEmpty
+            ? rawHr.fold<int>(0, (s, r) => s + r.hr) / rawHr.length
+            : null;
+      } else {
+        meanHrToStore = hrvMeanHr.isNaN ? null : hrvMeanHr;
+      }
+
       final indicators = <IndicatorsCompanion>[
         if (!rmssd.isNaN)
           IndicatorsCompanion(
@@ -562,11 +586,11 @@ class AcquisitionController extends Notifier<AcquisitionState> {
             value: Value(rmssd),
             at: Value(now),
           ),
-        if (!meanHr.isNaN)
+        if (meanHrToStore != null)
           IndicatorsCompanion(
             sessionId: Value(sessionId),
             kind: const Value('meanHr'),
-            value: Value(meanHr),
+            value: Value(meanHrToStore),
             at: Value(now),
           ),
         IndicatorsCompanion(
@@ -614,7 +638,7 @@ class AcquisitionController extends Notifier<AcquisitionState> {
         ],
       ];
 
-      // TRIMP Banister (modes A et D) — FC brute si disponible, fallback RR.
+      // TRIMP Banister (modes A et D) — réutilise rawHr déjà chargé.
       if ((modeAtStop == 'A' || modeAtStop == 'D') &&
           _trimpHrRest != null &&
           _trimpHrMax != null &&
@@ -622,7 +646,6 @@ class AcquisitionController extends Notifier<AcquisitionState> {
         final sessionDurationMs =
             now.difference(_sessionStartedAt!).inMilliseconds;
         final sex = _trimpSex ?? 'M';
-        final rawHr = await _db.hrDao.getForSession(sessionId);
         final TrimpResult trimp;
         if (rawHr.isNotEmpty) {
           // Méthode principale : FC brute, non biaisée par les artefacts RR.
@@ -673,10 +696,10 @@ class AcquisitionController extends Notifier<AcquisitionState> {
     } catch (_) {}
 
     // ── Étape 4 : FC repos issue du mode C ──────────────────────────────────
-    if (modeAtStop == 'C' && !meanHr.isNaN) {
+    if (modeAtStop == 'C' && !hrvMeanHr.isNaN) {
       try {
         final userId = await UserIdService.userId;
-        await _db.profileDao.setHrRestFromModeC(userId, meanHr.round());
+        await _db.profileDao.setHrRestFromModeC(userId, hrvMeanHr.round());
       } catch (_) {}
     }
 

@@ -604,6 +604,136 @@ void main() {
     });
   });
 
+  group('AcquisitionController — meanHr source selon le mode', () {
+    late AppDatabase db;
+    late ProviderContainer container;
+
+    setUpAll(_mockPathProvider);
+
+    setUp(() async {
+      db = _memDb();
+      container = ProviderContainer(overrides: [
+        appDatabaseProvider.overrideWithValue(db),
+      ]);
+      await _upsertProfil(db);
+    });
+
+    tearDown(() async {
+      container.dispose();
+      await db.close();
+    });
+
+    // Mode A/D : meanHr stocké = moyenne HrSamples (non biaisée par les RR).
+    // Simule une session avec artefacts RR massifs : _hrv.meanHr serait NaN
+    // (aucun RR valide dans l'accumulateur) mais HrSamples porte la vraie FC.
+    test('mode A — meanHr = moyenne HrSamples, pas accumulateur RR', () async {
+      final ctrl = container.read(acquisitionProvider.notifier);
+      await ctrl.startRecording(mode: 'A');
+
+      final sessions = await db.sessionDao.getAll();
+      final sid = sessions.first.id;
+
+      // Injecter des HrSamples représentant ~2 min à FC soutenue (96 bpm).
+      await db.hrDao.insertBatch([
+        HrSamplesCompanion(
+            sessionId: Value(sid), tMs: const Value(5000), hr: const Value(94)),
+        HrSamplesCompanion(
+            sessionId: Value(sid),
+            tMs: const Value(10000),
+            hr: const Value(96)),
+        HrSamplesCompanion(
+            sessionId: Value(sid),
+            tMs: const Value(15000),
+            hr: const Value(98)),
+        HrSamplesCompanion(
+            sessionId: Value(sid),
+            tMs: const Value(70000),
+            hr: const Value(96)),
+        HrSamplesCompanion(
+            sessionId: Value(sid),
+            tMs: const Value(75000),
+            hr: const Value(98)),
+      ]);
+      // _hrv.meanHr reste NaN (aucun _onSample appelé → accumulateur vide).
+
+      await ctrl.stopRecording();
+
+      final indics = await db.indicatorDao.forSession(sid);
+      final meanHrIndicator = indics.where((i) => i.kind == 'meanHr').toList();
+
+      // meanHr doit être stocké depuis HrSamples (≈96,4), pas ignoré (NaN).
+      expect(meanHrIndicator, hasLength(1),
+          reason: 'meanHr doit être écrit même si _hrv.meanHr est NaN');
+      expect(meanHrIndicator.first.value, closeTo(96.4, 0.1),
+          reason: 'Valeur attendue : moyenne des 5 HrSamples (94+96+98+96+98)/5');
+    });
+
+    test('mode D — meanHr = moyenne HrSamples', () async {
+      final ctrl = container.read(acquisitionProvider.notifier);
+      await ctrl.startRecording(mode: 'D');
+
+      final sessions = await db.sessionDao.getAll();
+      final sid = sessions.first.id;
+
+      await db.hrDao.insertBatch([
+        HrSamplesCompanion(
+            sessionId: Value(sid),
+            tMs: const Value(1000),
+            hr: const Value(140)),
+        HrSamplesCompanion(
+            sessionId: Value(sid),
+            tMs: const Value(2000),
+            hr: const Value(160)),
+      ]);
+
+      await ctrl.stopRecording();
+
+      final indics = await db.indicatorDao.forSession(sid);
+      final meanHrIndicator = indics.where((i) => i.kind == 'meanHr').toList();
+
+      expect(meanHrIndicator, hasLength(1));
+      expect(meanHrIndicator.first.value, closeTo(150.0, 0.01),
+          reason: '(140 + 160) / 2 = 150');
+    });
+
+    // Mode A/D sans HrSamples (capteur sans champ hr) → meanHr non stocké.
+    test('mode A sans HrSamples — meanHr non stocké (source vide)', () async {
+      final ctrl = container.read(acquisitionProvider.notifier);
+      await ctrl.startRecording(mode: 'A');
+      // Aucun HrSample inséré.
+      await ctrl.stopRecording();
+
+      final sessions = await db.sessionDao.getAll();
+      final indics = await db.indicatorDao.forSession(sessions.first.id);
+      expect(indics.where((i) => i.kind == 'meanHr'), isEmpty,
+          reason: 'Pas de HrSamples → pas de meanHr stocké');
+    });
+
+    // Mode C : meanHr doit toujours venir de _hrv.meanHr (accumulateur RR).
+    // Sans _onSample, l'accumulateur est vide → meanHr NaN → non stocké.
+    // Ce test vérifie la non-régression : le comportement mode C est inchangé.
+    test('mode C sans RR — meanHr non stocké (accumulateur NaN)', () async {
+      // Conteneur sans profil (mode C autorisé sans prérequis).
+      final dbC = _memDb();
+      final cC = ProviderContainer(overrides: [
+        appDatabaseProvider.overrideWithValue(dbC),
+      ]);
+      addTearDown(() async {
+        cC.dispose();
+        await dbC.close();
+      });
+
+      final ctrl = cC.read(acquisitionProvider.notifier);
+      await ctrl.startRecording(mode: 'C');
+      await ctrl.stopRecording();
+
+      final sessions = await dbC.sessionDao.getAll();
+      final indics = await dbC.indicatorDao.forSession(sessions.first.id);
+      expect(indics.where((i) => i.kind == 'meanHr'), isEmpty,
+          reason: 'Mode C sans RR : _hrv.meanHr = NaN → indicateur non écrit');
+    });
+  });
+
   group('sessionsHistoryProvider — stream stable', () {
     late AppDatabase db;
     late ProviderContainer container;
