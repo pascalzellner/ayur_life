@@ -178,15 +178,17 @@ class AcquisitionController extends Notifier<AcquisitionState> {
   static const _maxReconnectAttempts = 3;
   int _reconnectAttempts = 0;
 
-  // Taille maximale de _pendingRr entre deux flush (~8 min @ 60 bpm, 1 RR/batt.).
+  // Taille maximale de _pendingRr/_pendingHr entre deux flush (~8 min @ 60 bpm).
   // Garde-fou contre une croissance illimitée si un problème DB persiste.
   static const _maxPendingRr = 5000;
+  static const _maxPendingHr = 5000;
 
   // ── Persistance ───────────────────────────────────────────────────────────
   int? _sessionId;
   DateTime? _sessionStartedAt;
   String _currentMode = 'D';
   final List<({int tMs, double rr, bool gap})> _pendingRr = [];
+  final List<({int tMs, int hr})> _pendingHr = [];
   Timer? _flushTimer;
   bool _needsGapMarker = false;
 
@@ -195,7 +197,7 @@ class AcquisitionController extends Notifier<AcquisitionState> {
   int? _fcSv2ForOpportunistic;
   bool _opportunisticCaptured = false;
 
-  // ── TRIMP Banister (mode D) ───────────────────────────────────────────────
+  // ── TRIMP Banister (modes A et D) ────────────────────────────────────────
   int? _trimpHrRest;
   int? _trimpHrMax;
   String? _trimpSex;
@@ -345,16 +347,21 @@ class AcquisitionController extends Notifier<AcquisitionState> {
           rmssd: _hrv.rmssd,
         );
 
-    // ── Accumulation RR pour la persistance ─────────────────────────────────
+    // ── Accumulation pour la persistance ────────────────────────────────────
     if (_sessionId != null && _sessionStartedAt != null) {
       final rrs = sample.rrMs;
-      final tMsEnd =
+      final tMs =
           sample.receivedAt.difference(_sessionStartedAt!).inMilliseconds;
+
+      // FC brute : enregistrée pour chaque trame BLE, indépendamment des RR.
+      if (sample.hr > 0) {
+        _pendingHr.add((tMs: tMs, hr: sample.hr));
+      }
 
       if (rrs.isNotEmpty) {
         // Timestamp distinct par intervalle RR : on remonte depuis la fin du
         // paquet pour respecter la PK {sessionId, tMs} de rr_samples.
-        final timestamps = computeRrTimestamps(rrs, tMsEnd);
+        final timestamps = computeRrTimestamps(rrs, tMs);
 
         if (_needsGapMarker) {
           // Placer le marqueur juste avant le premier battement du paquet
@@ -367,8 +374,8 @@ class AcquisitionController extends Notifier<AcquisitionState> {
           _pendingRr.add((tMs: timestamps[i], rr: rrs[i], gap: false));
         }
       } else if (_needsGapMarker) {
-        // Paquet FC sans RR (rare) — marquer le gap au tMsEnd du paquet.
-        _pendingRr.add((tMs: tMsEnd, rr: 0.0, gap: true));
+        // Paquet FC sans RR (rare) — marquer le gap au tMs du paquet.
+        _pendingRr.add((tMs: tMs, rr: 0.0, gap: true));
         _needsGapMarker = false;
       }
     }
@@ -424,9 +431,9 @@ class AcquisitionController extends Notifier<AcquisitionState> {
 
     _currentMode = mode;
 
-    // Paramètres TRIMP Banister (mode D uniquement ; calculés ici pendant que
+    // Paramètres TRIMP Banister (modes A et D ; calculés ici pendant que
     // le profil est déjà chargé, réutilisés dans stopRecording).
-    if (mode == 'D') {
+    if (mode == 'A' || mode == 'D') {
       _trimpHrRest = profile?.hrRest;
       _trimpHrMax = profile?.hrMax ??
           (profile?.age != null ? estimateHrMaxTanaka(profile!.age!) : null);
@@ -490,12 +497,20 @@ class AcquisitionController extends Notifier<AcquisitionState> {
           await _flushPending();
         } catch (e) {
           debugPrint('[flush] Erreur insertBatch RR : $e');
-          // Garde-fou : limiter la croissance de _pendingRr si le problème
-          // DB persiste malgré les corrections.
           if (_pendingRr.length > _maxPendingRr) {
             final toDrop = _pendingRr.length - _maxPendingRr;
             _pendingRr.removeRange(0, toDrop);
             debugPrint('[flush] Garde-fou : $toDrop RR abandonnés (limite $_maxPendingRr)');
+          }
+        }
+        try {
+          await _flushPendingHr();
+        } catch (e) {
+          debugPrint('[flush] Erreur insertBatch HR : $e');
+          if (_pendingHr.length > _maxPendingHr) {
+            final toDrop = _pendingHr.length - _maxPendingHr;
+            _pendingHr.removeRange(0, toDrop);
+            debugPrint('[flush] Garde-fou : $toDrop HR abandonnés (limite $_maxPendingHr)');
           }
         }
       },
@@ -521,6 +536,9 @@ class AcquisitionController extends Notifier<AcquisitionState> {
     // ── Étape 1 : flush final ────────────────────────────────────────────────
     try {
       await _flushPending();
+    } catch (_) {}
+    try {
+      await _flushPendingHr();
     } catch (_) {}
 
     // ── Étape 2 : indicateurs ────────────────────────────────────────────────
@@ -596,23 +614,37 @@ class AcquisitionController extends Notifier<AcquisitionState> {
         ],
       ];
 
-      // TRIMP Banister (mode D) — calculé depuis les RR déjà flushés en base.
-      if (modeAtStop == 'D' &&
+      // TRIMP Banister (modes A et D) — FC brute si disponible, fallback RR.
+      if ((modeAtStop == 'A' || modeAtStop == 'D') &&
           _trimpHrRest != null &&
           _trimpHrMax != null &&
           _sessionStartedAt != null) {
-        final rawRr = await _db.rrDao.getRrForTrimp(sessionId);
-        final samples =
-            rawRr.map((r) => (tMs: r.tMs, rr: r.rr, gap: r.gap)).toList();
         final sessionDurationMs =
             now.difference(_sessionStartedAt!).inMilliseconds;
-        final trimp = computeTrimpBanisterFromRr(
-          samples: samples,
-          hrRest: _trimpHrRest!,
-          hrMax: _trimpHrMax!,
-          sex: _trimpSex ?? 'M',
-          sessionDurationMs: sessionDurationMs,
-        );
+        final sex = _trimpSex ?? 'M';
+        final rawHr = await _db.hrDao.getForSession(sessionId);
+        final TrimpResult trimp;
+        if (rawHr.isNotEmpty) {
+          // Méthode principale : FC brute, non biaisée par les artefacts RR.
+          trimp = computeTrimpBanisterFromHr(
+            samples: rawHr.map((r) => (tMs: r.tMs, hr: r.hr)).toList(),
+            hrRest: _trimpHrRest!,
+            hrMax: _trimpHrMax!,
+            sex: sex,
+            sessionDurationMs: sessionDurationMs,
+          );
+        } else {
+          // Fallback RR : si HrSamples vide (capteur exceptionnel sans hr).
+          final rawRr = await _db.rrDao.getRrForTrimp(sessionId);
+          trimp = computeTrimpBanisterFromRr(
+            samples:
+                rawRr.map((r) => (tMs: r.tMs, rr: r.rr, gap: r.gap)).toList(),
+            hrRest: _trimpHrRest!,
+            hrMax: _trimpHrMax!,
+            sex: sex,
+            sessionDurationMs: sessionDurationMs,
+          );
+        }
         indicators.addAll([
           IndicatorsCompanion(
             sessionId: Value(sessionId),
@@ -651,6 +683,7 @@ class AcquisitionController extends Notifier<AcquisitionState> {
     _sessionId = null;
     _sessionStartedAt = null;
     _pendingRr.clear();
+    _pendingHr.clear();
     _hrv.reset();
     _overrunTracker?.reset();
     _overrunTracker = null;
@@ -688,8 +721,25 @@ class AcquisitionController extends Notifier<AcquisitionState> {
     await _db.rrDao.insertBatch(rows);
 
     // Succès confirmé : retirer exactement les éléments écrits.
-    // Les entrées arrivées pendant l'await (en fin de liste) restent intactes.
     _pendingRr.removeRange(0, toWrite.length);
+  }
+
+  Future<void> _flushPendingHr() async {
+    final sessionId = _sessionId;
+    if (sessionId == null || _pendingHr.isEmpty) return;
+
+    final toWrite = List.of(_pendingHr);
+    final rows = toWrite
+        .map((e) => HrSamplesCompanion(
+              sessionId: Value(sessionId),
+              tMs: Value(e.tMs),
+              hr: Value(e.hr),
+            ))
+        .toList();
+
+    await _db.hrDao.insertBatch(rows);
+
+    _pendingHr.removeRange(0, toWrite.length);
   }
 
   Future<void> disconnect() async {
@@ -702,6 +752,9 @@ class AcquisitionController extends Notifier<AcquisitionState> {
   Future<void> _cleanup() async {
     try {
       await _flushPending();
+    } catch (_) {}
+    try {
+      await _flushPendingHr();
     } catch (_) {}
     _flushTimer?.cancel();
     _flushTimer = null;

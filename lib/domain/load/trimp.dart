@@ -100,3 +100,57 @@ TrimpResult computeTrimpBanisterFromRr({
 
   return TrimpResult(trimpTotal: trimpTotal, dataCoverageRatio: coverageRatio);
 }
+
+/// TRIMP Banister d'une session depuis les mesures de FC brute (champ hr BLE).
+///
+/// Avantage vs [computeTrimpBanisterFromRr] : la FC est décodée directement de
+/// chaque trame BLE, même lorsque les RR sont absents ou bruités (mouvement).
+/// Le biais lié aux artefacts moteurs est ainsi éliminé.
+///
+/// Stratégie :
+/// - Regrouper les FC valides (hr > 0) par minute ([tMs] ÷ 60 000).
+/// - Calculer la FC moyenne de chaque minute.
+/// - Appliquer la formule Banister par segment d'1 minute.
+/// - Minutes sans données BLE (gap ≥ 1 min) exclues du TRIMP mais comptées
+///   dans la durée totale → [dataCoverageRatio] honnête.
+///
+/// [samples] : triés par [tMs] ascendant.
+/// [sessionDurationMs] : de startedAt à endedAt.
+TrimpResult computeTrimpBanisterFromHr({
+  required List<({int tMs, int hr})> samples,
+  required int hrRest,
+  required int hrMax,
+  required String sex,
+  required int sessionDurationMs,
+}) {
+  if (sessionDurationMs <= 0) {
+    return const TrimpResult(trimpTotal: 0.0, dataCoverageRatio: 0.0);
+  }
+
+  final Map<int, List<int>> buckets = {};
+  for (final s in samples) {
+    if (s.hr > 0) {
+      final minute = s.tMs ~/ 60000;
+      buckets.putIfAbsent(minute, () => []).add(s.hr);
+    }
+  }
+
+  var trimpTotal = 0.0;
+  for (final hrs in buckets.values) {
+    final meanHr = hrs.reduce((a, b) => a + b) / hrs.length;
+    trimpTotal += computeTrimpBanisterSegment(
+      durationMin: 1.0,
+      hrSegment: meanHr,
+      hrRest: hrRest,
+      hrMax: hrMax,
+      sex: sex,
+    );
+  }
+
+  final totalMinutes = (sessionDurationMs / 60000).ceil();
+  final coverageRatio = totalMinutes > 0
+      ? (buckets.length / totalMinutes).clamp(0.0, 1.0)
+      : 0.0;
+
+  return TrimpResult(trimpTotal: trimpTotal, dataCoverageRatio: coverageRatio);
+}

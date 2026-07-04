@@ -268,4 +268,108 @@ void main() {
       expect(result.trimpTotal, greaterThan(0));
     });
   });
+
+  group('computeTrimpBanisterFromHr', () {
+    test('session vide → trimp=0, couverture=0', () {
+      final result = computeTrimpBanisterFromHr(
+        samples: [],
+        hrRest: hrRest, hrMax: hrMax, sex: 'M',
+        sessionDurationMs: 60000,
+      );
+      expect(result.trimpTotal, 0.0);
+      expect(result.dataCoverageRatio, 0.0);
+    });
+
+    test('sessionDurationMs=0 → trimp=0, couverture=0', () {
+      final result = computeTrimpBanisterFromHr(
+        samples: [(tMs: 1000, hr: 130)],
+        hrRest: hrRest, hrMax: hrMax, sex: 'M',
+        sessionDurationMs: 0,
+      );
+      expect(result.trimpTotal, 0.0);
+      expect(result.dataCoverageRatio, 0.0);
+    });
+
+    test('1 minute à 130 bpm → TRIMP ≈ segment unitaire', () {
+      // Plusieurs trames BLE à 130 bpm dans la première minute.
+      final samples = List.generate(
+        10,
+        (i) => (tMs: i * 6000, hr: 130), // toutes dans minute 0
+      );
+      final result = computeTrimpBanisterFromHr(
+        samples: samples,
+        hrRest: hrRest, hrMax: hrMax, sex: 'M',
+        sessionDurationMs: 60000,
+      );
+      final expected = computeTrimpBanisterSegment(
+        durationMin: 1.0, hrSegment: 130,
+        hrRest: hrRest, hrMax: hrMax, sex: 'M',
+      );
+      expect(result.trimpTotal, closeTo(expected, 1e-9));
+      expect(result.dataCoverageRatio, closeTo(1.0, 0.01));
+    });
+
+    test('hr=0 ignoré', () {
+      final samples = [
+        (tMs: 0, hr: 0),    // invalide → ignoré
+        (tMs: 1000, hr: 130),
+      ];
+      final result = computeTrimpBanisterFromHr(
+        samples: samples,
+        hrRest: hrRest, hrMax: hrMax, sex: 'M',
+        sessionDurationMs: 60000,
+      );
+      expect(result.trimpTotal, greaterThan(0));
+    });
+
+    test('gap BLE > 1 minute → minute exclue, couverture < 100%', () {
+      // Trame dans minute 0 uniquement ; minutes 1+ = pas de données.
+      final samples = [(tMs: 5000, hr: 130)];
+      final result = computeTrimpBanisterFromHr(
+        samples: samples,
+        hrRest: hrRest, hrMax: hrMax, sex: 'M',
+        sessionDurationMs: 180000, // 3 minutes
+      );
+      // 1 minute avec données sur 3 → couverture ≈ 0.33
+      expect(result.dataCoverageRatio, closeTo(1.0 / 3.0, 0.01));
+    });
+
+    test('couverture complète : données sur toutes les minutes → ratio = 1.0', () {
+      // Une trame par minute sur 5 minutes.
+      final samples = List.generate(5, (i) => (tMs: i * 60000 + 1000, hr: 120));
+      final result = computeTrimpBanisterFromHr(
+        samples: samples,
+        hrRest: hrRest, hrMax: hrMax, sex: 'M',
+        sessionDurationMs: 300000,
+      );
+      expect(result.dataCoverageRatio, closeTo(1.0, 0.01));
+    });
+
+    // Test comparatif : pic FC avec RR corrompus → FromHr > 0, FromRr = 0.
+    // Simule une situation de mouvement intense : la trame BLE porte une FC
+    // élevée mais aucun RR valide (tous artefacts rejetés ou absents).
+    test('pic FC sans RR → FromHr capte la charge, FromRr = 0', () {
+      // Données HR : 1 trame à 160 bpm dans la première minute.
+      final hrSamples = [(tMs: 5000, hr: 160)];
+
+      // Données RR correspondantes : vides (RR non émis pendant le mouvement).
+      final rrSamples = <({int tMs, double rr, bool gap})>[];
+
+      final trimpFromHr = computeTrimpBanisterFromHr(
+        samples: hrSamples,
+        hrRest: hrRest, hrMax: hrMax, sex: 'M',
+        sessionDurationMs: 60000,
+      );
+      final trimpFromRr = computeTrimpBanisterFromRr(
+        samples: rrSamples,
+        hrRest: hrRest, hrMax: hrMax, sex: 'M',
+        sessionDurationMs: 60000,
+      );
+
+      expect(trimpFromHr.trimpTotal, greaterThan(0),
+          reason: 'La FC brute capte le pic même sans RR');
+      expect(trimpFromRr.trimpTotal, 0.0,
+          reason: 'Sans RR valide, computeFromRr ne peut pas calculer de TRIMP');
+    });
+  });
 }

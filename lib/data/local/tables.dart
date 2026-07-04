@@ -127,6 +127,22 @@ class HooperMackinnonEntries extends Table {
   DateTimeColumn get recordedAt => dateTime()();
 }
 
+// ── HrSamples (rétention COURTE, même politique que RrSamples) ───────────────
+
+/// FC brute de chaque trame BLE (champ hr de 0x2A37), indépendante des RR.
+/// Base du calcul TRIMP Banister — non biaisée par les artefacts RR moteurs.
+class HrSamples extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get sessionId =>
+      integer().references(Sessions, #id, onDelete: KeyAction.cascade)();
+
+  /// Offset ms depuis Session.startedAt (même référentiel que RrSamples.tMs).
+  IntColumn get tMs => integer()();
+
+  /// FC instantanée (bpm) décodée du champ hr de la trame BLE.
+  IntColumn get hr => integer()();
+}
+
 // ── DailyEntries (une ligne par userId × jour) ────────────────────────────────
 
 class DailyEntries extends Table {

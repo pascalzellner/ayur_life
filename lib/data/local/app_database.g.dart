@@ -1121,6 +1121,301 @@ class RrSamplesCompanion extends UpdateCompanion<RrSample> {
   }
 }
 
+class $HrSamplesTable extends HrSamples
+    with TableInfo<$HrSamplesTable, HrSample> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $HrSamplesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _sessionIdMeta = const VerificationMeta(
+    'sessionId',
+  );
+  @override
+  late final GeneratedColumn<int> sessionId = GeneratedColumn<int>(
+    'session_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES sessions (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _tMsMeta = const VerificationMeta('tMs');
+  @override
+  late final GeneratedColumn<int> tMs = GeneratedColumn<int>(
+    't_ms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _hrMeta = const VerificationMeta('hr');
+  @override
+  late final GeneratedColumn<int> hr = GeneratedColumn<int>(
+    'hr',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, sessionId, tMs, hr];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'hr_samples';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<HrSample> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('session_id')) {
+      context.handle(
+        _sessionIdMeta,
+        sessionId.isAcceptableOrUnknown(data['session_id']!, _sessionIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sessionIdMeta);
+    }
+    if (data.containsKey('t_ms')) {
+      context.handle(
+        _tMsMeta,
+        tMs.isAcceptableOrUnknown(data['t_ms']!, _tMsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_tMsMeta);
+    }
+    if (data.containsKey('hr')) {
+      context.handle(_hrMeta, hr.isAcceptableOrUnknown(data['hr']!, _hrMeta));
+    } else if (isInserting) {
+      context.missing(_hrMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  HrSample map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return HrSample(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      sessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}session_id'],
+      )!,
+      tMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}t_ms'],
+      )!,
+      hr: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}hr'],
+      )!,
+    );
+  }
+
+  @override
+  $HrSamplesTable createAlias(String alias) {
+    return $HrSamplesTable(attachedDatabase, alias);
+  }
+}
+
+class HrSample extends DataClass implements Insertable<HrSample> {
+  final int id;
+  final int sessionId;
+
+  /// Offset ms depuis Session.startedAt (même référentiel que RrSamples.tMs).
+  final int tMs;
+
+  /// FC instantanée (bpm) décodée du champ hr de la trame BLE.
+  final int hr;
+  const HrSample({
+    required this.id,
+    required this.sessionId,
+    required this.tMs,
+    required this.hr,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['session_id'] = Variable<int>(sessionId);
+    map['t_ms'] = Variable<int>(tMs);
+    map['hr'] = Variable<int>(hr);
+    return map;
+  }
+
+  HrSamplesCompanion toCompanion(bool nullToAbsent) {
+    return HrSamplesCompanion(
+      id: Value(id),
+      sessionId: Value(sessionId),
+      tMs: Value(tMs),
+      hr: Value(hr),
+    );
+  }
+
+  factory HrSample.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return HrSample(
+      id: serializer.fromJson<int>(json['id']),
+      sessionId: serializer.fromJson<int>(json['sessionId']),
+      tMs: serializer.fromJson<int>(json['tMs']),
+      hr: serializer.fromJson<int>(json['hr']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'sessionId': serializer.toJson<int>(sessionId),
+      'tMs': serializer.toJson<int>(tMs),
+      'hr': serializer.toJson<int>(hr),
+    };
+  }
+
+  HrSample copyWith({int? id, int? sessionId, int? tMs, int? hr}) => HrSample(
+    id: id ?? this.id,
+    sessionId: sessionId ?? this.sessionId,
+    tMs: tMs ?? this.tMs,
+    hr: hr ?? this.hr,
+  );
+  HrSample copyWithCompanion(HrSamplesCompanion data) {
+    return HrSample(
+      id: data.id.present ? data.id.value : this.id,
+      sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
+      tMs: data.tMs.present ? data.tMs.value : this.tMs,
+      hr: data.hr.present ? data.hr.value : this.hr,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HrSample(')
+          ..write('id: $id, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('tMs: $tMs, ')
+          ..write('hr: $hr')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, sessionId, tMs, hr);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is HrSample &&
+          other.id == this.id &&
+          other.sessionId == this.sessionId &&
+          other.tMs == this.tMs &&
+          other.hr == this.hr);
+}
+
+class HrSamplesCompanion extends UpdateCompanion<HrSample> {
+  final Value<int> id;
+  final Value<int> sessionId;
+  final Value<int> tMs;
+  final Value<int> hr;
+  const HrSamplesCompanion({
+    this.id = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    this.tMs = const Value.absent(),
+    this.hr = const Value.absent(),
+  });
+  HrSamplesCompanion.insert({
+    this.id = const Value.absent(),
+    required int sessionId,
+    required int tMs,
+    required int hr,
+  }) : sessionId = Value(sessionId),
+       tMs = Value(tMs),
+       hr = Value(hr);
+  static Insertable<HrSample> custom({
+    Expression<int>? id,
+    Expression<int>? sessionId,
+    Expression<int>? tMs,
+    Expression<int>? hr,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (sessionId != null) 'session_id': sessionId,
+      if (tMs != null) 't_ms': tMs,
+      if (hr != null) 'hr': hr,
+    });
+  }
+
+  HrSamplesCompanion copyWith({
+    Value<int>? id,
+    Value<int>? sessionId,
+    Value<int>? tMs,
+    Value<int>? hr,
+  }) {
+    return HrSamplesCompanion(
+      id: id ?? this.id,
+      sessionId: sessionId ?? this.sessionId,
+      tMs: tMs ?? this.tMs,
+      hr: hr ?? this.hr,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (sessionId.present) {
+      map['session_id'] = Variable<int>(sessionId.value);
+    }
+    if (tMs.present) {
+      map['t_ms'] = Variable<int>(tMs.value);
+    }
+    if (hr.present) {
+      map['hr'] = Variable<int>(hr.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HrSamplesCompanion(')
+          ..write('id: $id, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('tMs: $tMs, ')
+          ..write('hr: $hr')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $ConsentLogTable extends ConsentLog
     with TableInfo<$ConsentLogTable, ConsentLogData> {
   @override
@@ -3371,6 +3666,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $SessionsTable sessions = $SessionsTable(this);
   late final $IndicatorsTable indicators = $IndicatorsTable(this);
   late final $RrSamplesTable rrSamples = $RrSamplesTable(this);
+  late final $HrSamplesTable hrSamples = $HrSamplesTable(this);
   late final $ConsentLogTable consentLog = $ConsentLogTable(this);
   late final $ProfileTable profile = $ProfileTable(this);
   late final $DailyEntriesTable dailyEntries = $DailyEntriesTable(this);
@@ -3379,6 +3675,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final SessionDao sessionDao = SessionDao(this as AppDatabase);
   late final IndicatorDao indicatorDao = IndicatorDao(this as AppDatabase);
   late final RrDao rrDao = RrDao(this as AppDatabase);
+  late final HrDao hrDao = HrDao(this as AppDatabase);
   late final ProfileDao profileDao = ProfileDao(this as AppDatabase);
   late final ConsentDao consentDao = ConsentDao(this as AppDatabase);
   late final DailyEntryDao dailyEntryDao = DailyEntryDao(this as AppDatabase);
@@ -3391,6 +3688,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     sessions,
     indicators,
     rrSamples,
+    hrSamples,
     consentLog,
     profile,
     dailyEntries,
@@ -3411,6 +3709,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('rr_samples', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'sessions',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('hr_samples', kind: UpdateKind.delete)],
     ),
     WritePropagation(
       on: TableUpdateQuery.onTableName(
@@ -3480,6 +3785,24 @@ final class $$SessionsTableReferences
     ).filter((f) => f.sessionId.id.sqlEquals($_itemColumn<int>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_rrSamplesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$HrSamplesTable, List<HrSample>>
+  _hrSamplesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.hrSamples,
+    aliasName: $_aliasNameGenerator(db.sessions.id, db.hrSamples.sessionId),
+  );
+
+  $$HrSamplesTableProcessedTableManager get hrSamplesRefs {
+    final manager = $$HrSamplesTableTableManager(
+      $_db,
+      $_db.hrSamples,
+    ).filter((f) => f.sessionId.id.sqlEquals($_itemColumn<int>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_hrSamplesRefsTable($_db));
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -3599,6 +3922,31 @@ class $$SessionsTableFilterComposer
           }) => $$RrSamplesTableFilterComposer(
             $db: $db,
             $table: $db.rrSamples,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> hrSamplesRefs(
+    Expression<bool> Function($$HrSamplesTableFilterComposer f) f,
+  ) {
+    final $$HrSamplesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.hrSamples,
+      getReferencedColumn: (t) => t.sessionId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$HrSamplesTableFilterComposer(
+            $db: $db,
+            $table: $db.hrSamples,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -3764,6 +4112,31 @@ class $$SessionsTableAnnotationComposer
     return f(composer);
   }
 
+  Expression<T> hrSamplesRefs<T extends Object>(
+    Expression<T> Function($$HrSamplesTableAnnotationComposer a) f,
+  ) {
+    final $$HrSamplesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.hrSamples,
+      getReferencedColumn: (t) => t.sessionId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$HrSamplesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.hrSamples,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
   Expression<T> hooperMackinnonEntriesRefs<T extends Object>(
     Expression<T> Function($$HooperMackinnonEntriesTableAnnotationComposer a) f,
   ) {
@@ -3807,6 +4180,7 @@ class $$SessionsTableTableManager
           PrefetchHooks Function({
             bool indicatorsRefs,
             bool rrSamplesRefs,
+            bool hrSamplesRefs,
             bool hooperMackinnonEntriesRefs,
           })
         > {
@@ -3869,6 +4243,7 @@ class $$SessionsTableTableManager
               ({
                 indicatorsRefs = false,
                 rrSamplesRefs = false,
+                hrSamplesRefs = false,
                 hooperMackinnonEntriesRefs = false,
               }) {
                 return PrefetchHooks(
@@ -3876,6 +4251,7 @@ class $$SessionsTableTableManager
                   explicitlyWatchedTables: [
                     if (indicatorsRefs) db.indicators,
                     if (rrSamplesRefs) db.rrSamples,
+                    if (hrSamplesRefs) db.hrSamples,
                     if (hooperMackinnonEntriesRefs) db.hooperMackinnonEntries,
                   ],
                   addJoins: null,
@@ -3917,6 +4293,27 @@ class $$SessionsTableTableManager
                                 table,
                                 p0,
                               ).rrSamplesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.sessionId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (hrSamplesRefs)
+                        await $_getPrefetchedData<
+                          Session,
+                          $SessionsTable,
+                          HrSample
+                        >(
+                          currentTable: table,
+                          referencedTable: $$SessionsTableReferences
+                              ._hrSamplesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$SessionsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).hrSamplesRefs,
                           referencedItemsForCurrentItem:
                               (item, referencedItems) => referencedItems.where(
                                 (e) => e.sessionId == item.id,
@@ -3967,6 +4364,7 @@ typedef $$SessionsTableProcessedTableManager =
       PrefetchHooks Function({
         bool indicatorsRefs,
         bool rrSamplesRefs,
+        bool hrSamplesRefs,
         bool hooperMackinnonEntriesRefs,
       })
     >;
@@ -4581,6 +4979,300 @@ typedef $$RrSamplesTableProcessedTableManager =
       $$RrSamplesTableUpdateCompanionBuilder,
       (RrSample, $$RrSamplesTableReferences),
       RrSample,
+      PrefetchHooks Function({bool sessionId})
+    >;
+typedef $$HrSamplesTableCreateCompanionBuilder =
+    HrSamplesCompanion Function({
+      Value<int> id,
+      required int sessionId,
+      required int tMs,
+      required int hr,
+    });
+typedef $$HrSamplesTableUpdateCompanionBuilder =
+    HrSamplesCompanion Function({
+      Value<int> id,
+      Value<int> sessionId,
+      Value<int> tMs,
+      Value<int> hr,
+    });
+
+final class $$HrSamplesTableReferences
+    extends BaseReferences<_$AppDatabase, $HrSamplesTable, HrSample> {
+  $$HrSamplesTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $SessionsTable _sessionIdTable(_$AppDatabase db) =>
+      db.sessions.createAlias(
+        $_aliasNameGenerator(db.hrSamples.sessionId, db.sessions.id),
+      );
+
+  $$SessionsTableProcessedTableManager get sessionId {
+    final $_column = $_itemColumn<int>('session_id')!;
+
+    final manager = $$SessionsTableTableManager(
+      $_db,
+      $_db.sessions,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_sessionIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$HrSamplesTableFilterComposer
+    extends Composer<_$AppDatabase, $HrSamplesTable> {
+  $$HrSamplesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get tMs => $composableBuilder(
+    column: $table.tMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get hr => $composableBuilder(
+    column: $table.hr,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$SessionsTableFilterComposer get sessionId {
+    final $$SessionsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sessionId,
+      referencedTable: $db.sessions,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SessionsTableFilterComposer(
+            $db: $db,
+            $table: $db.sessions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$HrSamplesTableOrderingComposer
+    extends Composer<_$AppDatabase, $HrSamplesTable> {
+  $$HrSamplesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get tMs => $composableBuilder(
+    column: $table.tMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get hr => $composableBuilder(
+    column: $table.hr,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$SessionsTableOrderingComposer get sessionId {
+    final $$SessionsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sessionId,
+      referencedTable: $db.sessions,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SessionsTableOrderingComposer(
+            $db: $db,
+            $table: $db.sessions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$HrSamplesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $HrSamplesTable> {
+  $$HrSamplesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get tMs =>
+      $composableBuilder(column: $table.tMs, builder: (column) => column);
+
+  GeneratedColumn<int> get hr =>
+      $composableBuilder(column: $table.hr, builder: (column) => column);
+
+  $$SessionsTableAnnotationComposer get sessionId {
+    final $$SessionsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.sessionId,
+      referencedTable: $db.sessions,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$SessionsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.sessions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$HrSamplesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $HrSamplesTable,
+          HrSample,
+          $$HrSamplesTableFilterComposer,
+          $$HrSamplesTableOrderingComposer,
+          $$HrSamplesTableAnnotationComposer,
+          $$HrSamplesTableCreateCompanionBuilder,
+          $$HrSamplesTableUpdateCompanionBuilder,
+          (HrSample, $$HrSamplesTableReferences),
+          HrSample,
+          PrefetchHooks Function({bool sessionId})
+        > {
+  $$HrSamplesTableTableManager(_$AppDatabase db, $HrSamplesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$HrSamplesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$HrSamplesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$HrSamplesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> sessionId = const Value.absent(),
+                Value<int> tMs = const Value.absent(),
+                Value<int> hr = const Value.absent(),
+              }) => HrSamplesCompanion(
+                id: id,
+                sessionId: sessionId,
+                tMs: tMs,
+                hr: hr,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int sessionId,
+                required int tMs,
+                required int hr,
+              }) => HrSamplesCompanion.insert(
+                id: id,
+                sessionId: sessionId,
+                tMs: tMs,
+                hr: hr,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$HrSamplesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({sessionId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (sessionId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.sessionId,
+                                referencedTable: $$HrSamplesTableReferences
+                                    ._sessionIdTable(db),
+                                referencedColumn: $$HrSamplesTableReferences
+                                    ._sessionIdTable(db)
+                                    .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$HrSamplesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $HrSamplesTable,
+      HrSample,
+      $$HrSamplesTableFilterComposer,
+      $$HrSamplesTableOrderingComposer,
+      $$HrSamplesTableAnnotationComposer,
+      $$HrSamplesTableCreateCompanionBuilder,
+      $$HrSamplesTableUpdateCompanionBuilder,
+      (HrSample, $$HrSamplesTableReferences),
+      HrSample,
       PrefetchHooks Function({bool sessionId})
     >;
 typedef $$ConsentLogTableCreateCompanionBuilder =
@@ -5831,6 +6523,8 @@ class $AppDatabaseManager {
       $$IndicatorsTableTableManager(_db, _db.indicators);
   $$RrSamplesTableTableManager get rrSamples =>
       $$RrSamplesTableTableManager(_db, _db.rrSamples);
+  $$HrSamplesTableTableManager get hrSamples =>
+      $$HrSamplesTableTableManager(_db, _db.hrSamples);
   $$ConsentLogTableTableManager get consentLog =>
       $$ConsentLogTableTableManager(_db, _db.consentLog);
   $$ProfileTableTableManager get profile =>

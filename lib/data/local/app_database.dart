@@ -10,6 +10,7 @@ import '../../domain/load/trimp.dart';
 import 'daos/consent_dao.dart';
 import 'daos/daily_entry_dao.dart';
 import 'daos/hooper_dao.dart';
+import 'daos/hr_dao.dart';
 import 'daos/indicator_dao.dart';
 import 'daos/profile_dao.dart';
 import 'daos/rr_dao.dart';
@@ -23,6 +24,7 @@ part 'app_database.g.dart';
     Sessions,
     Indicators,
     RrSamples,
+    HrSamples,
     ConsentLog,
     Profile,
     DailyEntries,
@@ -32,6 +34,7 @@ part 'app_database.g.dart';
     SessionDao,
     IndicatorDao,
     RrDao,
+    HrDao,
     ProfileDao,
     ConsentDao,
     DailyEntryDao,
@@ -43,7 +46,7 @@ class AppDatabase extends _$AppDatabase {
       : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -60,6 +63,9 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 4) {
             await m.createTable(hooperMackinnonEntries);
+          }
+          if (from < 5) {
+            await m.createTable(hrSamples);
           }
         },
         beforeOpen: (details) async {
@@ -88,17 +94,19 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> _recoverOrphanSession(Session session, DateTime closeAt) async {
     final rawRr = await rrDao.getRrForTrimp(session.id);
+    final rawHr = await hrDao.getForSession(session.id);
     final totalBeats = rawRr.where((r) => !r.gap && r.rr > 0).length;
 
-    // endedAt = dernier RR persisté → exclut le temps mort entre le crash et le
-    // redémarrage. tMs = offset ms depuis startedAt (pas un timestamp epoch).
-    // Cas limite (aucun RR) → startedAt : durée nulle, 0% légitime.
-    final DateTime endedAt;
-    if (rawRr.isNotEmpty) {
-      endedAt = session.startedAt.add(Duration(milliseconds: rawRr.last.tMs));
-    } else {
-      endedAt = session.startedAt;
+    // endedAt = max(dernier RR, dernier HR) → exclut le temps mort entre crash
+    // et redémarrage. tMs = offset ms depuis startedAt (référentiel relatif).
+    // Cas limite (aucune donnée) → startedAt : durée nulle, 0% légitime.
+    int maxTMs = rawRr.isNotEmpty ? rawRr.last.tMs : 0;
+    if (rawHr.isNotEmpty && rawHr.last.tMs > maxTMs) {
+      maxTMs = rawHr.last.tMs;
     }
+    final DateTime endedAt = maxTMs > 0
+        ? session.startedAt.add(Duration(milliseconds: maxTMs))
+        : session.startedAt;
 
     final indicators = <IndicatorsCompanion>[
       IndicatorsCompanion(
@@ -116,24 +124,36 @@ class AppDatabase extends _$AppDatabase {
       ),
     ];
 
-    // TRIMP Banister (mode D) — calculé depuis les RR déjà en base.
-    if (session.mode == 'D') {
+    // TRIMP Banister (modes A et D) : HR si disponible, fallback RR sinon.
+    if (session.mode == 'D' || session.mode == 'A') {
       final p = await profileDao.getProfile(session.userId);
       final hrRest = p?.hrRest;
-      final hrMax = p?.hrMax ??
-          (p?.age != null ? estimateHrMaxTanaka(p!.age!) : null);
+      final hrMax =
+          p?.hrMax ?? (p?.age != null ? estimateHrMaxTanaka(p!.age!) : null);
       if (hrRest != null && hrMax != null) {
-        final samples =
-            rawRr.map((r) => (tMs: r.tMs, rr: r.rr, gap: r.gap)).toList();
+        final sex = p?.sex ?? 'M';
         final sessionDurationMs =
             endedAt.difference(session.startedAt).inMilliseconds;
-        final trimp = computeTrimpBanisterFromRr(
-          samples: samples,
-          hrRest: hrRest,
-          hrMax: hrMax,
-          sex: p!.sex ?? 'M',
-          sessionDurationMs: sessionDurationMs,
-        );
+        final TrimpResult trimp;
+        if (rawHr.isNotEmpty) {
+          // Méthode principale : FC brute, non biaisée par les artefacts RR.
+          trimp = computeTrimpBanisterFromHr(
+            samples: rawHr.map((r) => (tMs: r.tMs, hr: r.hr)).toList(),
+            hrRest: hrRest,
+            hrMax: hrMax,
+            sex: sex,
+            sessionDurationMs: sessionDurationMs,
+          );
+        } else {
+          // Fallback RR : sessions antérieures à l'introduction de HrSamples.
+          trimp = computeTrimpBanisterFromRr(
+            samples: rawRr.map((r) => (tMs: r.tMs, rr: r.rr, gap: r.gap)).toList(),
+            hrRest: hrRest,
+            hrMax: hrMax,
+            sex: sex,
+            sessionDurationMs: sessionDurationMs,
+          );
+        }
         indicators.addAll([
           IndicatorsCompanion(
             sessionId: Value(session.id),
@@ -156,8 +176,8 @@ class AppDatabase extends _$AppDatabase {
     await sessionDao.closeSession(session.id, endedAt, 0.0);
   }
 
-  /// Purge les RrSamples antérieurs à [cutoff] en conservant les Indicators.
-  /// À appeler au démarrage de l'app (exigence de rétention courte).
+  /// Purge les données à rétention courte (RrSamples + HrSamples) antérieures
+  /// à [cutoff] en conservant les Indicators.
   Future<void> purgeRrSamples(DateTime cutoff) async {
     final oldSessionIds = await (select(sessions)
           ..where((s) => s.endedAt.isSmallerThanValue(cutoff)))
@@ -168,6 +188,9 @@ class AppDatabase extends _$AppDatabase {
 
     await (delete(rrSamples)
           ..where((rr) => rr.sessionId.isIn(oldSessionIds)))
+        .go();
+    await (delete(hrSamples)
+          ..where((r) => r.sessionId.isIn(oldSessionIds)))
         .go();
   }
 }
